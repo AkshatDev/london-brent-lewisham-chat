@@ -1,0 +1,39 @@
+[project]
+name = "london-brent-lewisham-chat"
+version = "0.1.0"
+description = "A FastAPI service that answers questions about Brent and Lewisham using an external API."
+readme = "README.md"
+authors = [
+    { name = "AkshatDev", email = "akshat.thakur8@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "asgi-correlation-id>=5.0.1",
+    "fastapi[standard]>=0.162.0",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.16.2",
+    "python-json-logger>=4.2.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.fastapi]
+entrypoint = "london_brent_lewisham_chat.app:app"
+
+[tool.ruff.lint]
+extend-select = ["D", "ANN"]
+ignore = ["D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]

@@ -1,0 +1,19 @@
+**/__pycache__
+**/*.py[oc]
+**/build/
+**/dist/
+**/*.egg-info
+.git
+.venv
+.env*
+.pytest_cache/
+.ruff_cache/
+.vscode
+.idea
+.claude/
+CLAUDE.md
+*:Zone.Identifier
+docs/_build
+
+# Not needed at runtime (tests run with uv / CI)
+tests/

@@ -17,3 +17,5 @@ docs/_build
 
 # Not needed at runtime (tests run with uv / CI)
 tests/
+CLAUDE.md
+*.xlsx

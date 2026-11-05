@@ -27,3 +27,5 @@ CLAUDE.md
 # Deploy and docs output
 .fastapicloud/
 docs/_build
+CLAUDE.md
+*.xlsx

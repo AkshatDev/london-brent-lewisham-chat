@@ -4,3 +4,5 @@ docs/
 .venv/
 __pycache__/
 .git/
+CLAUDE.md
+*.xlsx

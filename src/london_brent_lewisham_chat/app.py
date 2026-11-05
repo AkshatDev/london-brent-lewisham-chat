@@ -49,7 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         The configured application.
     """
     app = FastAPI(title="london-brent-lewisham-chat", lifespan=lifespan)
-    app.state.settings = settings or Settings()
+    app.state.settings = settings if settings is not None else Settings()
 
     @app.middleware("http")
     async def log_request(

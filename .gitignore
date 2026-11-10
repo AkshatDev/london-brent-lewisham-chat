@@ -31,3 +31,4 @@ CLAUDE.md
 *.xlsx
 # Raw snapshots and external reference files: local only (PLAN.md §11)
 /data/
+/findings/data/*.jsonl

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from psycopg.conninfo import make_conninfo
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -26,6 +26,34 @@ class Settings(BaseSettings):
 
     log_level: LogLevel = "INFO"
     """Minimum level of log records written to stdout."""
+
+    logfire_token: SecretStr | None = None
+    """Write token of the Logfire project. Without it nothing is sent to Logfire
+    (local runs, tests). A secret: kept in ``.env`` locally, a secret env var when
+    deployed, never logged."""
+
+    logfire_console: bool = False
+    """Also print Logfire's spans and logs to the terminal, as readable text. For
+    trying Logfire out locally: the text is mixed into the JSON log lines on stdout,
+    so it stays off in production and in tests."""
+
+    @field_validator("logfire_token", mode="before")
+    @classmethod
+    def _blank_token_is_no_token(cls, value: object) -> object:
+        """Treat ``LOGFIRE_TOKEN=`` (as in ``.env.example``) as not set.
+
+        Without this an empty value becomes an empty secret, and Logfire would try
+        to send with it instead of sending nothing.
+
+        Args:
+            value: The raw value from the environment or ``.env``.
+
+        Returns:
+            ``None`` for a blank value, otherwise the value unchanged.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class PipelineSettings(BaseSettings):

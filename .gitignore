@@ -32,3 +32,6 @@ CLAUDE.md
 # Raw snapshots and external reference files: local only (PLAN.md §11)
 /data/
 /findings/data/*.jsonl
+
+# Logfire's local credentials folder (from `logfire auth`)
+.logfire/

@@ -9,12 +9,14 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+import logfire
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .config import Settings
 from .log_config import configure_logging
+from .observability import configure_logfire
 from .schemas import Health
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     Logging is configured here rather than in ``create_app()``: the server applies
     its own logging setup after importing the app, which would overwrite ours.
+    Records also go to Logfire, which ``create_app()`` has configured already.
 
     Args:
         app: The application being started; its settings give the log level.
@@ -33,7 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     Yields:
         Control to FastAPI while the app is serving requests.
     """
-    configure_logging(app.state.settings.log_level)
+    configure_logging(app.state.settings.log_level, to_logfire=True)
     yield
 
 
@@ -98,6 +101,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Added last so it runs first: every request gets an ID before it is logged,
     # and the ID is returned in the X-Request-ID response header.
     app.add_middleware(CorrelationIdMiddleware)
+
+    # One span per request (route, status, duration). Here, not in lifespan: it adds
+    # middleware, which can't be added once the app has started, and Logfire must be
+    # configured before it. (The server's logging setup doesn't touch Logfire.)
+    configure_logfire(app.state.settings)
+    logfire.instrument_fastapi(app)
     return app
 
 

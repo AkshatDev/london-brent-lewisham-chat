@@ -21,7 +21,12 @@ curl -i localhost:8000/health     # {"status":"ok"} + X-Request-ID header
 curl -si localhost:8000/health -H "X-Request-ID: $(python3 -c 'import uuid; print(uuid.uuid4())')" | grep -i x-request-id
 # a caller's ID is kept only if it is a valid UUID4; anything else is replaced with a new one
 LOG_LEVEL=DEBUG uv run fastapi dev                       # more logs
+LOGFIRE_CONSOLE=true uv run fastapi dev                  # also print Logfire spans in the terminal
 ```
+
+Logfire: traces are sent only when `LOGFIRE_TOKEN` is set in `.env` (write token from
+the Logfire project: Settings → Write tokens). Edit `.env` in an editor; never paste the
+token on the command line. Tests never send (`tests/conftest.py` hides `.env` from them).
 
 ## Checks (run before every commit)
 
@@ -68,9 +73,9 @@ uv run fastapi cloud env list                         # which variables are set
 uv run fastapi cloud logs --no-follow --since 30m     # recent logs
 uv run fastapi cloud logs                             # stream live
 
-# Set a secret from .env via stdin (never on the command line), e.g. an API key:
-grep '^EXTERNAL_API_KEY=' .env | cut -d= -f2- \
-  | uv run fastapi cloud env set EXTERNAL_API_KEY --value-stdin --secret
+# Set a secret from .env via stdin (never on the command line), e.g. the Logfire token:
+grep '^LOGFIRE_TOKEN=' .env | cut -d= -f2- \
+  | uv run fastapi cloud env set LOGFIRE_TOKEN --value-stdin --secret
 ```
 
 `fastapi deploy` uploads the current files, so check `git branch --show-current` and

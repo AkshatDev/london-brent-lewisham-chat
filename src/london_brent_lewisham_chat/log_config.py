@@ -5,9 +5,10 @@ where those records go and what they look like (one JSON object per line).
 """
 
 from logging.config import dictConfig
+from typing import Any
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", *, to_logfire: bool = False) -> None:
     """Configure JSON logging to stdout for the whole process.
 
     Every record becomes one JSON line with time, level, logger name, message, any
@@ -15,11 +16,31 @@ def configure_logging(level: str = "INFO") -> None:
     (``disable_existing_loggers`` is off) and propagate to the root handler;
     uvicorn's access log is silenced because the app logs its own request line.
 
+    With ``to_logfire``, every record also goes to Logfire, attached to the span of
+    the request it belongs to. Opt-in so the pipeline, which doesn't set Logfire up,
+    keeps plain JSON logging.
+
     Safe to call more than once: each call replaces the previous configuration.
 
     Args:
         level: Minimum level to log, e.g. ``"INFO"`` or ``"DEBUG"``.
+        to_logfire: Also send every record to Logfire (``configure_logfire`` first).
     """
+    handlers: dict[str, dict[str, Any]] = {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "json",
+            "filters": ["correlation_id"],
+        }
+    }
+    if to_logfire:
+        # Same filter, so a record's correlation ID is searchable in Logfire too.
+        handlers["logfire"] = {
+            "class": "logfire.LogfireLoggingHandler",
+            "filters": ["correlation_id"],
+        }
+
     config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -32,15 +53,8 @@ def configure_logging(level: str = "INFO") -> None:
                 "timestamp": "time",
             },
         },
-        "handlers": {
-            "stdout": {
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stdout",
-                "formatter": "json",
-                "filters": ["correlation_id"],
-            }
-        },
-        "root": {"handlers": ["stdout"], "level": level},
+        "handlers": handlers,
+        "root": {"handlers": list(handlers), "level": level},
         "loggers": {
             "uvicorn": {"handlers": [], "propagate": True},
             "uvicorn.access": {"handlers": [], "propagate": False},

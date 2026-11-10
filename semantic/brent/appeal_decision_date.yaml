@@ -1,0 +1,33 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: appeal_decision_date
+web_label: Appeal decision date
+meaning: >
+  Date of the appeal decision (see appeal_decision). Not the council's decision date:
+  see decision_date.
+schema_definition: Contains the appeal decision date for the application (DD/MM/YYYY)
+format: {type: date, pattern: DD/MM/YYYY}
+
+checks_passed:
+  - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
+  - Always filled together with appeal_decision.
+  - No placeholder dates (the most common date is used 8 times).
+
+known_issues:
+  - id: early_coverage
+    description: >
+      Mostly from 2019 on (about 120-180 a year); before 2018 only 0-18 a year, so
+      counts for earlier years are incomplete.
+
+  - id: same_day_appeal
+    count: 2
+    description: >
+      Brent-DY860529 and Brent-DY860634 have appeal_decision_date = decision_date
+      (01/03/1987). See decision_date.yaml (open question 8).
+
+rules:
+  - '"When was the appeal decided?" uses appeal_decision_date.'
+  - Trends by year are reliable from 2019 on only.
+
+checked:
+  date: 2026-11-10
+  source: live API

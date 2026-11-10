@@ -1,0 +1,166 @@
+# Load-time cleaning, Brent only (golden rule). Not chat bot context: the field
+# files describe the data as it is after these rules.
+# Applied in this order: all_records, fields, derived; then the not_loaded fields
+# are left out of the cleaned database (they stay in the local raw snapshots).
+# Actions: strip, drop_records, map, fill_null, flag, to_text, derive.
+
+all_records:
+  - id: strip_whitespace
+    action: strip
+    applies_to: all_text_fields
+    decided: 2026-11-09
+    reason: >
+      Leading/trailing whitespace hides values from exact matches, e.g. decision
+      "\tApproved" (3 records, a hidden tab).
+
+  - id: drop_test_records
+    action: drop_records
+    decided: 2026-11-09
+    reason: >
+      Test records, not real applications ("*** TEST APPLICATION ***", "Test
+      application record for system monitoring"). All have a 55/ reference; only
+      these ids are dropped (open question 6).
+    ids:
+      - Brent-55_0003
+      - Brent-55_0015
+      - Brent-55_0100
+
+  - id: drop_empty_records
+    action: drop_records
+    when_all_null: [status, decision, decision_date, description]
+    expected_count: 407
+    decided: 2026-11-09
+    reason: >
+      Empty records: no status, decision, decision_date or description (also no
+      borough, URL or ward). Nothing in them can answer a question. 24 of them
+      duplicate a full record, which is kept. The condition matches exactly these 407
+      (live API 2026-11-09); a different count on a new download needs a look.
+
+  - id: drop_opdc_duplicates
+    action: drop_records
+    decided: 2026-11-10
+    reason: >
+      The same 4 applications are recorded twice, under Brent and OPDC (same
+      lpa_app_no, description, decision and decision_date). The Brent copy is kept: it
+      has valid_date, decision_target_date and the planning portal URL, and comes with
+      the regular feed. The OPDC copies are legacy imports with nothing the Brent copy
+      lacks. Their status (Lapsed) differs for 3 pairs (open question 5).
+    ids:
+      - OPDC-18_1022
+      - OPDC-18_2581
+      - OPDC-19_2236
+      - OPDC-19_2890
+
+fields:
+  status:
+    - id: lapsed_case
+      action: map
+      from: lapsed
+      to: Lapsed
+      decided: 2026-11-09
+      reason: Lower-case variant of the schema value (37 records).
+
+    - id: appeal_in_progress_case
+      action: map
+      from: Appeal in Progress
+      to: Appeal In Progress
+      decided: 2026-11-09
+      reason: Case variant of the schema value (2 records).
+
+    - id: empty_to_unknown
+      action: fill_null
+      to: Unknown
+      decided: 2026-11-09
+      reason: No status recorded; Unknown is a schema value.
+
+  decision_date:
+    - id: early_1987_approximate
+      action: flag
+      flag: approximate_decision_date
+      decided: 2026-11-09
+      reason: >
+        Month-only legacy dates (01/01-01/04/1987, 24 of 25 on the 1st of a month),
+        before the oldest valid_date in Brent (23/04/1987).
+      ids:
+        - Brent-861288
+        - Brent-861442
+        - Brent-861727
+        - Brent-862186
+        - Brent-862382
+        - Brent-862390
+        - Brent-DY850076
+        - Brent-DY860443
+        - Brent-DY860529
+        - Brent-DY860530
+        - Brent-DY860634
+        - Brent-DY860635
+        - Brent-DY861916
+        - Brent-DY862014
+        - Brent-DY862029
+        - Brent-DY862100
+        - Brent-DY862124
+        - Brent-DY862259
+        - Brent-DY862413
+        - Brent-DY862414
+        - Brent-DY862472
+        - Brent-DY862478
+        - Brent-DY870003
+        - Brent-DY870124
+        - Brent-DY870386
+
+  site_number:
+    - id: site_number_as_text
+      action: to_text
+      decided: 2026-11-10
+      reason: >
+        The schema type is string, but 1,624 values come as JSON numbers (all whole
+        numbers). Store every value as text, numbers without a decimal part (2 -> "2"),
+        so 2 and "2" are the same value.
+
+derived:
+  - id: address
+    action: derive
+    columns: [address, address_kind]
+    from: [site_name, site_number, street_name, locality, postcode]
+    decided: 2026-11-10
+    address_kind: >
+      Sort the stripped site_name into one kind, in this order:
+      missing (null or blank);
+      number_only (only a house number, letter or range, e.g. 2, 24A, 85-91);
+      street_record (starts with "Street Record");
+      with_full_postcode (contains a full UK postcode, e.g. HA0 2AA);
+      several_parts (contains a comma, no full postcode);
+      one_part (everything else).
+    address: >
+      with_full_postcode, several_parts, street_record: address = site_name.
+      number_only, one_part, missing: join site_name, site_number (only if different
+      from site_name), street_name, locality and postcode with ", ", skipping empty
+      parts. Trim spaces and stray commas from each part first (locality has
+      "London," and ", Wembley").
+    reason: >
+      site_name is a full address for 84% of records; for about 7.8% (number only,
+      one part, missing) the other address fields complete it, and they are almost
+      always there. One column means the bot can't pick the wrong field.
+
+  - id: legacy_record
+    action: derive
+    columns: [legacy_record]
+    from: [bo_system]
+    decided: 2026-11-10
+    rule: legacy_record = true when bo_system is "FME Legacy Data Import", else false.
+    reason: >
+      Legacy records never have valid_date, decision_target_date or url_planning_app
+      (3,528 after cleaning, none has one). bo_system itself is not a web column; this
+      flag lets the bot explain the empty fields instead of treating them as gaps.
+
+not_loaded:
+  - field: site_name
+    reason: Combined into address.
+  - field: site_number
+    reason: Combined into address.
+  - field: street_name
+    reason: Combined into address.
+  - field: locality
+    reason: Combined into address.
+  - field: postcode
+    reason: Combined into address.

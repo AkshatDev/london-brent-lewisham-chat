@@ -1,0 +1,32 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: description
+web_label: Description
+meaning: >
+  Free-text description of the proposed development. The main source for "what was
+  applied for" questions (works, sizes, uses).
+schema_definition: Provides a general description of proposed development
+format: text
+
+checks_passed:
+  - Every filled value is a string; no blank or whitespace-only values.
+
+known_issues:
+  - id: ldms_placeholder
+    count: 227
+    description: >
+      "No description provided by LDMS" is a placeholder, not a description (includes
+      the 25 early-1987 legacy records).
+
+  - id: varied_wording
+    description: >
+      Mostly unique text (31,315 distinct of 36,544). The same works are written in
+      different ways ("single storey" / "single-storey", "dwellinghouse" /
+      "the dwellinghouse", with or without a full stop).
+
+rules:
+  - Search descriptions by meaning or full text, never by exact match.
+  - Treat "No description provided by LDMS" as no description.
+
+checked:
+  date: 2026-11-09
+  source: live API

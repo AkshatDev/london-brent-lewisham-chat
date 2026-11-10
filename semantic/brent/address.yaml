@@ -1,0 +1,57 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: address
+web_label: null   # derived; the website shows Site name, Site number, Street name, Locality, Postcode
+meaning: >
+  Where the site is, as one text. Built at load from site_name, completed with
+  site_number, street_name, locality and postcode when site_name is only a number, a
+  single name or missing (derived rule "address" in cleaning.yaml).
+format: text
+derived_from: [site_name, site_number, street_name, locality, postcode]
+
+values_of_address_kind:
+  - with_full_postcode    # about 84%
+  - several_parts         # street and town, no full postcode
+  - number_only
+  - one_part
+  - street_record
+  - missing
+
+known_issues:
+  - id: no_full_postcode
+    description: >
+      Not every address has a full postcode: some have only the postcode district
+      (e.g. NW10), some none. Large sites are often described in words
+      ("Land next to Haynes House, Haynes Road, Wembley").
+
+  - id: street_record
+    description: >
+      "Street Record, <road>, <town>" means no single property: the whole street is
+      the site.
+
+  - id: mixed_parts
+    description: >
+      House numbers can have letters, ranges or lists ("24A", "85-91", "2 & 2A"), or be
+      building names ("York House"). Upper and lower case are mixed
+      ("North Circular Road" / "NORTH CIRCULAR ROAD").
+
+  - id: generic_street_names
+    description: >
+      High Road, High Street and similar names exist in several parts of Brent; a
+      street name alone doesn't say where.
+
+  - id: places_outside_brent
+    description: >
+      Some addresses name towns or postcode districts mostly outside Brent (Harrow,
+      Stanmore, Edgware, North Kensington; W10, HA1). Probably postal towns. Taken as
+      Brent because borough says Brent (deferred open question 10).
+
+rules:
+  - For "where is it?", use address.
+  - For "applications on <street>" or "at <place>", use full-text search on address,
+    case-insensitive; never an exact match.
+  - The same address on several applications usually means the same site.
+  - Don't use address to decide whether a site is in Brent; borough does that.
+
+checked:
+  date: 2026-11-10
+  source: live API

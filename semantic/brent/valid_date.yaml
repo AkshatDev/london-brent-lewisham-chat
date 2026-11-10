@@ -1,0 +1,23 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: valid_date
+web_label: Valid date
+schema_definition: Contains the date at which the application is valid (DD/MM/YYYY)
+format: {type: date, pattern: DD/MM/YYYY}
+
+checks_passed:
+  - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
+
+known_issues:
+  - id: missing_valid_date
+    count: 3602
+    description: >
+      Legacy records (legacy_record = true, 3,528) never have a valid_date. The other
+      74 are real gaps.
+
+rules:
+  - A missing valid_date does not mean the application is new or pending.
+  - Counts or trends by valid_date leave out the legacy records.
+
+checked:
+  date: 2026-11-10
+  source: live API

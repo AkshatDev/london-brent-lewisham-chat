@@ -1,0 +1,92 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: status
+web_label: Status
+meaning: >
+  Current stage or outcome of the application, overwritten as it moves on (no history
+  in the API). Mixes stages (Application Received, Commenced, Completed), council
+  outcomes (Approved, Refused, Withdrawn) and appeal outcomes (Allowed, Dismissed).
+  The council's original decision is a separate field: decision.
+schema_definition: >
+  Describes the current status of the application, see Field Values tab for all
+  Status Types
+format: text
+
+# Values after cleaning (case variants merged, empty -> Unknown), live API 2026-11-09.
+values:
+  - Approved
+  - Refused
+  - Completed
+  - Lapsed
+  - Withdrawn
+  - Dismissed
+  - Superseded
+  - Application Received
+  - Unknown
+  - Allowed
+  - Commenced
+  - Application Under Consideration
+  - Appeal Received
+  - Closed
+  - Split Decision
+  - ZZZ
+  - Application Invalid
+  - No Objection to Proposal (OBS only)
+  - Appeal In Progress
+  - Objection Raised to Proposal (OBS only)
+values_not_in_schema: [ZZZ]
+
+schema_values_never_seen:
+  - Called in by Secretary of State
+  - Comment Issued
+  - Declined to Determine
+  - Insufficient Fee
+  - Not Required
+  - Opinion Issued
+  - Pending Legacy Record
+  - Pre-application Advice Case Completed
+  - Quashed
+  - Referred to Mayor
+  - Revoked
+
+known_issues:
+  - id: zzz_placeholder
+    count: 16
+    description: >
+      Not a status. All 16 have decision = Refused, appeal_decision = ZZZ (no other
+      record has that) and an appeal_decision_date (2018-2025). Meaning unknown
+      (open question 2).
+    hint: >
+      Not confirmed. A finished appeal whose outcome was not recorded as Allowed or
+      Dismissed (pending appeals never have an appeal_decision_date).
+
+  - id: unknown_status
+    count: 418
+    description: >
+      Status was empty in the source. 407 are empty records, dropped at load
+      (drop_empty_records in cleaning.yaml); the other 11 have real content but no
+      status (decided, outcome not recorded; open question 9).
+
+  - id: under_consideration_but_approved
+    count: 2
+    description: >
+      status = Application Under Consideration but decision = Approved, no decision_date:
+      Brent-25_3290, Brent-26_1174. Either the decision was filled in early or the
+      status is behind (open question 4).
+
+  - id: stale_appeal_in_progress
+    count: 1
+    description: >
+      Brent-96_1985, a 1996 application, still has status Appeal In Progress. Almost
+      certainly out of date (open question 5).
+
+rules:
+  - For "was it refused by the council?", read decision, not status.
+  - Count appeal outcomes from appeal_decision, not status. status moves on after an
+    appeal (e.g. to Completed or Lapsed); only 242 of 493 allowed appeals still have
+    status Allowed.
+  - Appeals still running show only in status (Appeal Received, Appeal In Progress);
+    they have no appeal_decision yet.
+
+checked:
+  date: 2026-11-10
+  source: live API

@@ -1,0 +1,64 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: decision
+web_label: Decision
+meaning: >
+  The original decision by the local planning authority named in lpa_name (Brent
+  Council, OPDC or Hammersmith & Fulham for sites in Brent). Not changed by an appeal:
+  the appeal outcome is in appeal_decision, and the current stage is in status
+  (e.g. decision Refused + status Allowed = refused, then won on appeal).
+schema_definition: Describes the decision given, see Field Values tab for all Decision Types
+format: text
+
+# Values after cleaning (whitespace stripped), live API 2026-11-09.
+values:
+  - Approved
+  - Refused
+  - Withdrawn
+  - Closed
+  - No Objection to Proposal (OBS only)
+  - Objection Raised to Proposal (OBS only)
+  - Comment Issued
+
+schema_values_never_seen:
+  - Called in by Secretary of State
+  - Declined to Determine
+  - Not Required
+  - Opinion Issued
+  - Pre-application Advice Case Completed
+  - Referred to Mayor
+  - Split Decision
+
+known_issues:
+  - id: split_decision_only_in_status
+    count: 22
+    description: >
+      Split Decision is never a council decision in Brent. The 22 status Split Decision
+      are appeal outcomes: all 22 have appeal_decision = Split Decision.
+
+  - id: empty_decision
+    count: 1035
+    description: >
+      1,035 have no decision. By status, three groups:
+      567 not decided yet (Application Received 459, Application Under Consideration 74,
+      Closed 21, Application Invalid 13), where no decision is normal;
+      418 with status Unknown (407 empty records, dropped at load; 11 with content);
+      50 decided but the decision value is missing (Superseded 28, Lapsed 17,
+      Allowed 3, Dismissed 2; open question 3).
+    hint: >
+      Not confirmed. For the 50, the status usually implies the decision: only an
+      approval can lapse, a superseded application was usually approved, and an appeal
+      (Allowed / Dismissed) follows a refusal.
+
+  - id: decision_without_date
+    count: 18
+    description: See decision_date.yaml (known issue decision_without_date).
+
+rules:
+  - '"Approved / refused by the council?" uses decision, not status.'
+  - No decision is normal for applications not decided yet (Application Received,
+    Application Under Consideration, Closed, Application Invalid).
+  - Withdrawn is the applicant stopping, not the council deciding.
+
+checked:
+  date: 2026-11-09
+  source: live API

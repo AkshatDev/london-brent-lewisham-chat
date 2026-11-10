@@ -1,0 +1,53 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: appeal_decision
+web_label: Appeal decision
+meaning: >
+  Outcome of an appeal against the council's decision, decided by the Planning
+  Inspectorate. Set once and not overwritten, unlike status. Null means no appeal was
+  decided (most applications are never appealed).
+schema_definition: >
+  Describes the decision of the appeal made by the planning inspectorate, see Field
+  Values tab for all appeal decision types
+format: text
+
+# Values seen in Brent, live API 2026-11-10.
+values:
+  - Dismissed
+  - Allowed
+  - Withdrawn
+  - Split Decision
+  - ZZZ
+values_not_in_schema: [ZZZ]
+
+schema_values_never_seen:
+  - Appeal In Progress
+  - Quashed
+  - Appeal Closed
+
+checks_passed:
+  - Every filled value is a string; no case or whitespace variants.
+  - Always filled together with appeal_decision_date.
+  - Never contradicts status (status Allowed / Dismissed / Split Decision always has the
+    same appeal_decision).
+
+known_issues:
+  - id: zzz
+    count: 16
+    description: >
+      The same 16 records as status ZZZ. Meaning unknown (open question 2).
+
+  - id: withdrawn_appeal
+    count: 43
+    description: >
+      A withdrawn appeal leaves the council's decision standing; 11 of these now have
+      status Refused.
+
+rules:
+  - '"How many appeals were allowed / dismissed?" uses appeal_decision, not status.'
+  - Appeals still running are not here; they show in status (Appeal Received, Appeal
+    In Progress).
+  - The council's original decision is in decision; appeal_decision does not change it.
+
+checked:
+  date: 2026-11-10
+  source: live API

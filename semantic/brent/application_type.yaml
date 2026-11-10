@@ -1,0 +1,27 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: application_type
+web_label: Application type
+meaning: >
+  The broad kind of application, in 3 groups. It is not the outcome: the outcome is
+  in decision.
+schema_definition: Describes the generic Application Type, see Field Values tab for all Application Types
+format: text
+
+# Values seen in Brent, live API 2026-11-09.
+values:
+  - All Other
+  - Householder
+  - Prior Approval
+
+checks_passed:
+  - Every record has a value, all values are schema values, no case or whitespace variants.
+
+rules:
+  - Prior Approval is a kind of application, not an outcome; about a third are refused.
+    Use decision for the outcome.
+  - Only these 3 groups are known; more specific types (e.g. change of use, listed
+    building consent) can't be answered from this field.
+
+checked:
+  date: 2026-11-09
+  source: live API

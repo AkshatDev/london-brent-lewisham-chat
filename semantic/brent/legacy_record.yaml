@@ -1,0 +1,21 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: legacy_record
+web_label: null   # derived from bo_system (derived rule legacy_record in cleaning.yaml)
+meaning: >
+  True for records that came into the Datahub through the legacy import
+  (bo_system = FME Legacy Data Import).
+format: boolean
+
+checks_passed:
+  - 3,528 legacy records after cleaning; none has a valid_date, decision_target_date
+    or url_planning_app.
+
+rules:
+  - A legacy record has no valid date, target date or planning portal link. Say so
+    ("not recorded for this record"), don't call it a gap or pending.
+  - Questions that need valid_date or decision_target_date (decision times, decided on
+    time, trends by valid date) can't include legacy records.
+
+checked:
+  date: 2026-11-10
+  source: live API

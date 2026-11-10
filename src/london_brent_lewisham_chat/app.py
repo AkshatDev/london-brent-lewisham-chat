@@ -30,13 +30,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     its own logging setup after importing the app, which would overwrite ours.
     Records also go to Logfire, which ``create_app()`` has configured already.
 
+    One ``app started`` line then says where the app thinks it runs, so a deploy
+    that forgot ``ENVIRONMENT=production`` shows ``local`` in its first log line.
+
     Args:
-        app: The application being started; its settings give the log level.
+        app: The application being started; its settings give the log level and
+            the environment.
 
     Yields:
         Control to FastAPI while the app is serving requests.
     """
-    configure_logging(app.state.settings.log_level, to_logfire=True)
+    settings = app.state.settings
+    configure_logging(settings.log_level, to_logfire=True)
+    logger.info(
+        "app started",
+        extra={
+            "environment": settings.environment,
+            # Whether traces leave the machine; the token itself is never logged.
+            "sending_to_logfire": settings.logfire_token is not None,
+        },
+    )
     yield
 
 

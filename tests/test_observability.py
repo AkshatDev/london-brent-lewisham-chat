@@ -5,9 +5,12 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from london_brent_lewisham_chat import app as app_module
 from london_brent_lewisham_chat.app import create_app
 from london_brent_lewisham_chat.config import Settings
+from london_brent_lewisham_chat.observability import configure_logfire
 
 # Each test starts its own app while ``capsys`` is active (see test_logging.py).
 
@@ -54,3 +57,58 @@ def test_the_logfire_token_is_hidden_when_settings_are_printed() -> None:
     assert "secret-value" not in repr(settings)
     assert settings.logfire_token is not None
     assert settings.logfire_token.get_secret_value() == "secret-value"
+
+
+def test_environment_defaults_to_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    assert Settings().environment == "local"
+
+
+def test_environment_is_read_from_the_environment_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert Settings().environment == "production"
+
+
+def test_an_unknown_environment_stops_the_app_at_start_up() -> None:
+    with pytest.raises(ValidationError, match="environment"):
+        Settings(environment="prod")  # type: ignore[arg-type]
+
+
+def start_up_lines(out: str) -> list[dict]:
+    """Return the "app started" lines from captured stdout, each parsed from JSON."""
+    lines = [json.loads(line) for line in out.splitlines()]
+    return [line for line in lines if line["message"] == "app started"]
+
+
+def test_start_up_logs_the_environment_once(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with TestClient(create_app(Settings(environment="production"))) as client:
+        client.get("/health")
+
+    [line] = start_up_lines(capsys.readouterr().out)
+    assert line["environment"] == "production"
+    assert line["sending_to_logfire"] is False
+
+
+def test_start_up_says_traces_are_sent_but_never_logs_the_token(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Configure Logfire as if there were no token, so this test sends nothing;
+    # the app's settings still hold the token, which is what the log line reports.
+    monkeypatch.setattr(
+        app_module,
+        "configure_logfire",
+        lambda settings: configure_logfire(
+            settings.model_copy(update={"logfire_token": None})
+        ),
+    )
+    with TestClient(create_app(Settings(logfire_token="secret-value"))):
+        pass
+
+    out = capsys.readouterr().out
+    assert "secret-value" not in out
+    [line] = start_up_lines(out)
+    assert line["sending_to_logfire"] is True

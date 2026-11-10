@@ -27,6 +27,8 @@ LOGFIRE_CONSOLE=true uv run fastapi dev                  # also print Logfire sp
 Logfire: traces are sent only when `LOGFIRE_TOKEN` is set in `.env` (write token from
 the Logfire project: Settings → Write tokens). Edit `.env` in an editor; never paste the
 token on the command line. Tests never send (`tests/conftest.py` hides `.env` from them).
+Traces are tagged with `ENVIRONMENT` (`local` unless set); the first app log line,
+`app started`, shows it and whether traces are being sent (`sending_to_logfire`).
 
 ## Checks (run before every commit)
 
@@ -73,10 +75,17 @@ uv run fastapi cloud env list                         # which variables are set
 uv run fastapi cloud logs --no-follow --since 30m     # recent logs
 uv run fastapi cloud logs                             # stream live
 
+# Tag the deployed app as production (not a secret; the default is local):
+uv run fastapi cloud env set ENVIRONMENT production
+uv run fastapi cloud logs --no-follow --since 30m | grep '"app started"'   # check: "environment": "production"
+
 # Set a secret from .env via stdin (never on the command line), e.g. the Logfire token:
 grep '^LOGFIRE_TOKEN=' .env | cut -d= -f2- \
   | uv run fastapi cloud env set LOGFIRE_TOKEN --value-stdin --secret
 ```
+
+`env set` redeploys the app by default; add `--no-redeploy` to set several variables
+first and deploy once.
 
 `fastapi deploy` uploads the current files, so check `git branch --show-current` and
 `git status` first. `.fastapicloudignore` keeps `.env*`, `tests/` and `docs/` out.

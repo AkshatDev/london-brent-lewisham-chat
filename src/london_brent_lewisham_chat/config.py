@@ -13,6 +13,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
+Environment = Literal["local", "production"]
+"""Where the app runs. A fixed list, so a typo such as ``prod`` stops the app at
+start-up instead of tagging traces with a name nobody filters on."""
+
 
 class Settings(BaseSettings):
     """Typed configuration for the service.
@@ -26,6 +30,12 @@ class Settings(BaseSettings):
 
     log_level: LogLevel = "INFO"
     """Minimum level of log records written to stdout."""
+
+    environment: Environment = "local"
+    """Where the app runs; tags every trace so local and deployed runs can be told
+    apart in Logfire. Defaults to ``local`` so a fresh clone needs no setup; set
+    ``ENVIRONMENT=production`` on FastAPI Cloud (it is logged at start-up, so a
+    missing value shows in the first log line)."""
 
     logfire_token: SecretStr | None = None
     """Write token of the Logfire project. Without it nothing is sent to Logfire

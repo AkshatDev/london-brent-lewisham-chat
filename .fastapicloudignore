@@ -6,3 +6,10 @@ __pycache__/
 .git/
 CLAUDE.md
 *.xlsx
+# Working notes
+PLAN.md
+knowledge/
+semantic/
+
+# EDA notebook and its data: not needed at runtime
+findings/

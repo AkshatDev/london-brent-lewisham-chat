@@ -18,4 +18,4 @@ rules:
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

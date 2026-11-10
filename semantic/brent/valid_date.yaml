@@ -2,7 +2,7 @@
 field: valid_date
 web_label: Valid date
 schema_definition: Contains the date at which the application is valid (DD/MM/YYYY)
-format: {type: date, pattern: DD/MM/YYYY}
+format: date   # a real date in the database; the Datahub sends DD/MM/YYYY text
 
 checks_passed:
   - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
@@ -20,4 +20,4 @@ rules:
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

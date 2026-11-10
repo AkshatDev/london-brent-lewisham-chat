@@ -6,7 +6,7 @@ meaning: >
   on or after the valid date. In Brent it is usually 7 weeks after the valid date for
   All Other, 6 weeks for Householder and 5 weeks for Prior Approval.
 schema_definition: Contains the decision target date for the application (DD/MM/YYYY)
-format: {type: date, pattern: DD/MM/YYYY}
+format: date   # a real date in the database; the Datahub sends DD/MM/YYYY text
 
 checks_passed:
   - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
@@ -26,10 +26,12 @@ known_issues:
       applications have none.
 
   - id: overdue_without_decision
+    count: 33
     description: >
-      Some open applications (Application Received / Under Consideration, no
-      decision_date) passed their target over a year ago; their status is most likely
-      out of date (open question 5).
+      Open applications (Application Received / Under Consideration, no
+      decision_date) more than a year past their target date are flagged
+      status_stale = true: the Datahub stopped updating them, and those checked on
+      Brent's portal had moved on (record_flags.yaml; open question 5).
 
 rules:
   - '"Was it decided on time?" compares decision_date with decision_target_date; only
@@ -37,9 +39,9 @@ rules:
   - A target date in the future is normal for applications not decided yet.
   - Use the recorded target date; never work it out from valid_date with the
     statutory 8 or 13 weeks.
-  - An open application long past its target may have a stale status; say so rather
-    than call it pending.
+  - An application with status_stale = true is not pending. Say its status is
+    probably out of date and give url_planning_app.
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

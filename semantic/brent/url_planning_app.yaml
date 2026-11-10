@@ -1,0 +1,37 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: url_planning_app
+web_label: Planning application URL
+meaning: >
+  Link to the application's page on Brent's planning portal, where the documents,
+  plans and full decision notice are.
+schema_definition: Contains the website address to the published planning application
+format: >
+  https://pa.brent.gov.uk/online-applications/applicationDetails.do?keyVal=<key>&activeTab=summary
+
+checks_passed:
+  - All 32,906 URLs have exactly the format above (one host, one path, one key).
+  - Every URL is unique; no two applications share a page.
+  - Legacy records (legacy_record = true, 3,528) never have a URL.
+
+known_issues:
+  - id: url_space_fixed
+    count: 2
+    description: >
+      Brent-21_4321 and Brent-87_0946 had "online applications" (a space) in the path;
+      fixed to the hyphen at load (url_space_to_hyphen in cleaning.yaml).
+
+  - id: missing_url
+    count: 97
+    description: >
+      97 records that are not legacy records have no URL (Brent 81, OPDC 16).
+
+rules:
+  - Give this link when someone wants the documents, plans or decision notice.
+  - No URL on a legacy record is expected (legacy_record); say the record predates
+    the online portal.
+  - The portal is not read by this service (its robots.txt disallows automated
+    access); facts come from the database, the link is for people.
+
+checked:
+  date: 2026-11-10
+  source: cleaned database (core.applications), snapshot 2026-11-10

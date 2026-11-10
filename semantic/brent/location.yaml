@@ -1,0 +1,47 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: location_check
+web_label: null   # derived; not on the website
+meaning: >
+  How the record's centroid compares with the official Brent boundary (ONS, Local
+  Authority Districts December 2024, BFC). Proves by location that the site is in
+  Brent. Comes with ward_2022, centroid, centroid_source and placeholder_centroid.
+format: text
+
+values:
+  - inside          # 36,488
+  - boundary_edge   # 36: up to 16 m outside, on roads the boundary follows
+  - no_centroid     # 7: placeholder centroid and no Brent postcode to replace it
+
+related_columns:
+  ward_2022: >
+    Name of the ONS 2022 ward (December 2024 boundaries, 22 Brent wards) containing
+    the centroid. NULL for boundary_edge and no_centroid (43). Use this, not ward,
+    for "which ward": ward is the source text, with pre-2022 names, upper-case
+    copies and "- WARD NO LONGER EXISTS" suffixes.
+  centroid: Point (WGS84) for the site; NULL for the 7 no_centroid records.
+  centroid_source: >
+    datahub (the Datahub's centroid) or postcodes.io (the postcode's centroid,
+    used for 19 records whose Datahub centroid was a placeholder).
+  placeholder_centroid: >
+    true for the 26 records whose Datahub centroid was a placeholder in the sea off
+    Cornwall (49.76681, -7.55716).
+  site: Site polygon (WGS84) when the Datahub has one; NULL for 14,586.
+
+known_issues:
+  - id: boundary_edge
+    count: 36
+    description: >
+      Centroids 0-16 m outside the boundary: mostly "Street Record" rows on Edgware
+      Road, Acton Lane, Carlton Vale and Old North Circular Road, which the boundary
+      follows. Brent-15_3229 and Brent-17_4829 (765/767 Harrow Road, NW10 5NY) have a
+      postcode that postcodes.io puts in Hammersmith & Fulham, but Brent decided them;
+      kept as Brent.
+
+rules:
+  - For maps, distances and "near X", use centroid; skip rows where it is NULL.
+  - For "in ward X", use ward_2022.
+  - centroid_source = postcodes.io is the postcode's centre, not the exact site.
+
+checked:
+  date: 2026-11-10
+  source: cleaned database; ONS Open Geography (Brent only); postcodes.io (Brent postcodes only)

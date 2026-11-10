@@ -14,18 +14,25 @@ checks_passed:
   - Every value is a string, exactly "Brent"; no case or spacing variants.
   - Every record has a borough after cleaning (the 407 without one are the empty
     records, dropped at load).
+  - The only Datahub borough value that contains "Brent" but isn't exactly Brent is
+    "Market Quarter, Brent Cross South" (decided by Barnet), which is in Barnet and
+    never fetched (open question 11).
 
 known_issues:
   - id: ward_from_another_borough
-    count: 3
+    count: 1
     description: >
-      3 records say Brent but have a ward from another borough. Taken as Brent
-      (deferred open question 10).
+      OPDC-18_0210_FULOPDC has ward "East Acton" (not a Brent ward) but its centroid
+      is inside Brent, in ward Stonebridge (ward_2022). The 2 other records from
+      open question 10 were in Hammersmith & Fulham and are dropped at load
+      (drop_outside_borough).
 
 rules:
   - '"Which borough?" is always Brent here; borough is not a way to split Brent up
     (use address for places within Brent).'
   - Who decided is lpa_name, not borough (e.g. OPDC decides some sites in Brent).
+  - Every record has been checked by location against the official ONS Brent
+    boundary (location_check in location.yaml).
 
 checked:
   date: 2026-11-10

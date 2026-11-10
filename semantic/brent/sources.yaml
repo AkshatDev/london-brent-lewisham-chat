@@ -1,0 +1,86 @@
+# Source facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+# Where every value in core.applications comes from, and how to cite it.
+field: sources
+web_label: null
+meaning: >
+  The database is built from one main source (the Planning London Datahub) and
+  corrected or completed from four others. A citation names the source of the fact
+  actually stated, and says when a value differs from what the Datahub publishes.
+
+sources:
+  datahub:
+    name: Planning London Datahub (Greater London Authority)
+    url: https://planningdata.london.gov.uk
+    provides: Every application field, unless one of the sources below is named for it.
+    as_of: >
+      snapshot_date (the day we downloaded it; 2026-11-10) and last_updated (when the
+      Datahub last changed the record). The Datahub overwrites records and keeps no
+      history.
+    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), downloaded <snapshot_date>.'
+    licence: not checked
+
+  load_rules:
+    name: This service's load-time cleaning (semantic/brent/cleaning.yaml)
+    provides: >
+      Tidied values (whitespace, case variants, empty status -> Unknown, 2 portal URLs
+      repaired) and derived columns: address, address_kind, legacy_record, the flags in
+      record_flags.yaml.
+    cite_as: >
+      Cite the Datahub; for a derived column add "derived from <fields>". Tidying
+      (case, spaces) needs no mention.
+
+  brent_portal_manual_check:
+    name: London Borough of Brent planning portal, read by a person
+    url: https://pa.brent.gov.uk/online-applications/
+    checked_on: 2026-11-10
+    provides: >
+      Outcomes where outcome_source = portal_manual_check (11); the meaning of the
+      Datahub's ZZZ (appeal_record_deleted, 16); decision_not_issued (2);
+      Brent-96_1985 (status_stale). The service never reads the portal itself (its
+      robots.txt disallows automated access).
+    datahub_had: >
+      outcome_from_portal: no status, no decision. stale_outcome_from_portal: status
+      Application Received / Under Consideration. appeal_record_deleted: status and
+      appeal_decision ZZZ, appeal_decision_date set. decision_not_issued: as loaded.
+    cite_as: >
+      'Brent planning portal (<url_planning_app>), checked on 10 November 2026; the
+      Planning London Datahub shows <datahub_had>.'
+    licence: not checked
+
+  brent_portal_link:
+    name: London Borough of Brent planning portal
+    provides: url_planning_app, the page for people to read documents and the decision notice.
+    cite_as: Give the link as "see <url_planning_app>" for documents and to verify.
+
+  ons_geography:
+    name: Office for National Statistics, Open Geography Portal
+    url: https://geoportal.statistics.gov.uk
+    provides: >
+      location_check and ward_2022, from the Brent boundary (Local Authority Districts,
+      December 2024, BFC) and Brent's wards (December 2024; December 2021 kept for
+      older ward names). Fetched for Brent only (code E09000005).
+    cite_as: 'Ward and boundary: ONS Open Geography Portal, December 2024 boundaries.'
+    licence: not checked (attribution wording to be confirmed before publishing)
+
+  postcodes_io:
+    name: postcodes.io
+    url: https://postcodes.io
+    provides: >
+      centroid where centroid_source = postcodes.io (19): the postcode's centre, used
+      because the Datahub's point was a placeholder in the sea.
+    cite_as: "Location: centre of postcode <postcode>, from postcodes.io (the Datahub's location was a placeholder)."
+    licence: not checked
+
+rules:
+  - When asked for a source, name the source of each fact stated, using cite_as.
+  - A count or list from SQL cites the Datahub snapshot date, and adds "N of these were
+    corrected from Brent's planning portal" when any counted row has
+    outcome_source = portal_manual_check or appeal_record_deleted = true.
+  - Never say "the Datahub says X" when X came from another source; for corrected
+    values say what the Datahub shows and where the correction comes from.
+  - Never cite the portal for anything other than what was checked there.
+  - Offer url_planning_app as the place to verify (none for legacy records).
+
+checked:
+  date: 2026-11-10
+  source: cleaning.yaml, knowledge/brent_open_questions.md, knowledge/brent_portal_checks.md

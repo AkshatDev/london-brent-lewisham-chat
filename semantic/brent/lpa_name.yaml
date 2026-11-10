@@ -1,0 +1,28 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
+field: lpa_name
+web_label: null   # not one of the website's 16 columns
+meaning: >
+  The local planning authority that decides the application. Not where the site is:
+  every record here is in Brent (borough, location.yaml), whoever decided it.
+schema_definition: Contains the Local Planning Authority name, see Field Values tab for all available LPAs
+format: text
+
+# Values after cleaning (2026-11-10 snapshot).
+values:
+  - Brent   # 36,377
+  - OPDC    # 154: Old Oak and Park Royal Development Corporation, for sites in its area within Brent
+
+checks_passed:
+  - Every record has a value.
+  - The 3 applications recorded under both Brent and OPDC were decided by Brent
+    (Brent case officer, delegated decision; Brent's planning portal, checked
+    2026-11-10); the Brent copy is kept.
+
+rules:
+  - '"Who decided it?" uses lpa_name.'
+  - '"Applications in Brent" means every record, OPDC included; filter on lpa_name only
+    when the question is about the council or OPDC as decision-maker.'
+
+checked:
+  date: 2026-11-10
+  source: cleaned database (core.applications); not EDA'd in a notebook

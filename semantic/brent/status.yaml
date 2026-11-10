@@ -11,7 +11,7 @@ schema_definition: >
   Status Types
 format: text
 
-# Values after cleaning (case variants merged, empty -> Unknown), live API 2026-11-09.
+# Values after cleaning (case variants merged, empty -> Unknown, ZZZ -> Refused), 2026-11-10 snapshot.
 values:
   - Approved
   - Refused
@@ -28,12 +28,11 @@ values:
   - Appeal Received
   - Closed
   - Split Decision
-  - ZZZ
   - Application Invalid
   - No Objection to Proposal (OBS only)
   - Appeal In Progress
   - Objection Raised to Proposal (OBS only)
-values_not_in_schema: [ZZZ]
+values_not_in_schema: []   # ZZZ (deleted appeal record) becomes Refused at load
 
 schema_values_never_seen:
   - Called in by Secretary of State
@@ -49,44 +48,67 @@ schema_values_never_seen:
   - Revoked
 
 known_issues:
-  - id: zzz_placeholder
+  - id: deleted_appeal_record
     count: 16
     description: >
-      Not a status. All 16 have decision = Refused, appeal_decision = ZZZ (no other
-      record has that) and an appeal_decision_date (2018-2025). Meaning unknown
-      (open question 2).
-    hint: >
-      Not confirmed. A finished appeal whose outcome was not recorded as Allowed or
-      Dismissed (pending appeals never have an appeal_decision_date).
+      The Datahub sends status ZZZ for 16 refused applications whose appeal record was
+      deleted (portal: Appeal Decision "Technically Deleted Record"). Loaded as
+      Refused, with appeal_record_deleted = true (deleted_appeal in cleaning.yaml;
+      open question 2).
 
   - id: unknown_status
-    count: 418
+    count: 1
     description: >
-      Status was empty in the source. 407 are empty records, dropped at load
-      (drop_empty_records in cleaning.yaml); the other 11 have real content but no
-      status (decided, outcome not recorded; open question 9).
+      Brent-18_3324: status and decision empty in the source; Brent's planning portal
+      says Decided (10/03/2020) but shows no decision either. 9 other records had the
+      same gap; their outcome was read from the portal by a person and filled in
+      (outcome_source = portal_manual_check; open question 9).
 
   - id: under_consideration_but_approved
     count: 2
     description: >
       status = Application Under Consideration but decision = Approved, no decision_date:
-      Brent-25_3290, Brent-26_1174. Either the decision was filled in early or the
-      status is behind (open question 4).
+      Brent-25_3290, Brent-26_1174. The status is right: Brent's planning portal shows
+      both "Awaiting decision", subject to a Section 106 agreement not yet signed
+      (checked 2026-11-10). Flagged decision_not_issued = true (open question 4).
+
+  - id: stale_pending
+    count: 33
+    description: >
+      status Application Received or Application Under Consideration, no
+      decision_date, decision_target_date more than a year before the snapshot:
+      status_stale = true. The Datahub stopped updating them (32 of the first 35 not
+      updated for over a year); 3 checked on Brent's portal had moved on (approved;
+      appeal allowed; page removed). The 2 with a known outcome are filled from the
+      portal (outcome_source = portal_manual_check), so 33 remain flagged
+      (open question 5).
+
+  - id: lapsed_not_only_approvals
+    count: 35
+    description: >
+      35 records with status Lapsed have decision = Refused (of 1,826 Lapsed with a
+      decision). lapsed_date (not loaded) is always decision_date + 3 years, whatever
+      the decision, so status Lapsed does not show that a permission existed.
 
   - id: stale_appeal_in_progress
     count: 1
     description: >
-      Brent-96_1985, a 1996 application, still has status Appeal In Progress. Almost
-      certainly out of date (open question 5).
+      Brent-96_1985, a 1996 application, still has status Appeal In Progress. Brent's
+      own portal also still says "Appeal lodged" with no appeal decision (checked
+      2026-11-10): Brent's system was never updated, and no source has the outcome.
+      Flagged status_stale = true (open question 5).
 
 rules:
+  - status_stale = true means the status is probably out of date. Don't report the
+    application as pending or count it as pending; say the record hasn't been
+    updated and give url_planning_app.
   - For "was it refused by the council?", read decision, not status.
   - Count appeal outcomes from appeal_decision, not status. status moves on after an
-    appeal (e.g. to Completed or Lapsed); only 242 of 493 allowed appeals still have
+    appeal (e.g. to Completed or Lapsed); only 243 of 493 allowed appeals still have
     status Allowed.
   - Appeals still running show only in status (Appeal Received, Appeal In Progress);
     they have no appeal_decision yet.
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

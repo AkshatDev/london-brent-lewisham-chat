@@ -13,3 +13,6 @@ semantic/
 
 # EDA notebook and its data: not needed at runtime
 findings/
+
+# Raw snapshots and external reference files: local only (PLAN.md §11)
+/data/

@@ -3,21 +3,21 @@ field: decision
 web_label: Decision
 meaning: >
   The original decision by the local planning authority named in lpa_name (Brent
-  Council, OPDC or Hammersmith & Fulham for sites in Brent). Not changed by an appeal:
+  Council or OPDC, for sites in Brent). Not changed by an appeal:
   the appeal outcome is in appeal_decision, and the current stage is in status
   (e.g. decision Refused + status Allowed = refused, then won on appeal).
 schema_definition: Describes the decision given, see Field Values tab for all Decision Types
 format: text
 
-# Values after cleaning (whitespace stripped), live API 2026-11-09.
+# Values after cleaning (2026-11-10 snapshot; includes 10 filled from Brent's portal).
 values:
-  - Approved
-  - Refused
-  - Withdrawn
-  - Closed
-  - No Objection to Proposal (OBS only)
-  - Objection Raised to Proposal (OBS only)
-  - Comment Issued
+  - Approved                                  # 26,256
+  - Refused                                   # 8,234
+  - Withdrawn                                 # 1,416
+  - Closed                                    # 6
+  - No Objection to Proposal (OBS only)       # 4
+  - Objection Raised to Proposal (OBS only)   # 2
+  - Comment Issued                            # 1
 
 schema_values_never_seen:
   - Called in by Secretary of State
@@ -36,18 +36,36 @@ known_issues:
       are appeal outcomes: all 22 have appeal_decision = Split Decision.
 
   - id: empty_decision
-    count: 1035
+    count: 612
     description: >
-      1,035 have no decision. By status, three groups:
-      567 not decided yet (Application Received 459, Application Under Consideration 74,
-      Closed 21, Application Invalid 13), where no decision is normal;
-      418 with status Unknown (407 empty records, dropped at load; 11 with content);
-      50 decided but the decision value is missing (Superseded 28, Lapsed 17,
-      Allowed 3, Dismissed 2; open question 3).
-    hint: >
-      Not confirmed. For the 50, the status usually implies the decision: only an
-      approval can lapse, a superseded application was usually approved, and an appeal
-      (Allowed / Dismissed) follows a refusal.
+      612 have no decision. By status, three groups:
+      560 not decided yet (Application Received 454, Application Under Consideration 72,
+      Closed 21, Application Invalid 13), where no decision is normal (33 of them are
+      status_stale);
+      1 with status Unknown (Brent-18_3324: decided, the portal has no decision either);
+      51 decided but the decision value is missing (Superseded 28, Lapsed 17,
+      Allowed 4, Dismissed 2; Allowed includes Brent-20_4264, an appeal allowed with
+      no council decision). Not inferred from status (open question 3, answered
+      2026-11-10): where a decision is recorded, status does not settle it
+      (Lapsed: 35 of 1,826 Refused; Superseded: 5 of 544 Refused; Allowed: 5 of 239
+      Approved).
+
+  - id: outcome_from_portal
+    count: 9
+    description: >
+      9 records had a decision_date but no status or decision in the Datahub. A
+      person read the outcome on Brent's planning portal (2026-11-10): 5 Approved
+      (Grant Permission; Prior approval required, GTD), 4 Refused (Refuse Planning
+      Permission; Prior approval required, REF). The portal's Decision Issued Date
+      equals decision_date for all 9. outcome_source = portal_manual_check.
+
+  - id: decision_not_issued
+    count: 2
+    description: >
+      Brent-25_3290, Brent-26_1174: decision Approved, status Application Under
+      Consideration, no decision_date. The portal shows "Awaiting decision", subject
+      to a Section 106 agreement (25/3290 went to committee 18/08/2026). The other 4
+      pending applications awaiting an S106 have no decision.
 
   - id: decision_without_date
     count: 18
@@ -58,7 +76,14 @@ rules:
   - No decision is normal for applications not decided yet (Application Received,
     Application Under Consideration, Closed, Application Invalid).
   - Withdrawn is the applicant stopping, not the council deciding.
+  - No decision means "not recorded"; never guess it from status.
+  - outcome_source = portal_manual_check means status and decision came from Brent's
+    planning portal, not the Datahub; count them like any other decision.
+  - decision_not_issued = true means the decision was recorded before it was issued
+    (the portal says "Awaiting decision", legal agreement pending). Treat the application as
+    not decided yet; leave it out of approval counts; say the Datahub records the
+    decision early.
 
 checked:
-  date: 2026-11-09
-  source: live API
+  date: 2026-11-10
+  source: live API; recounted on the cleaned database (core.applications)

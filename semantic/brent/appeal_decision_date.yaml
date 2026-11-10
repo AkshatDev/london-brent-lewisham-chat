@@ -5,11 +5,12 @@ meaning: >
   Date of the appeal decision (see appeal_decision). Not the council's decision date:
   see decision_date.
 schema_definition: Contains the appeal decision date for the application (DD/MM/YYYY)
-format: {type: date, pattern: DD/MM/YYYY}
+format: date   # a real date in the database; the Datahub sends DD/MM/YYYY text
 
 checks_passed:
   - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
-  - Always filled together with appeal_decision.
+  - Filled together with appeal_decision, except Brent-20_4264 (appeal Allowed from
+    Brent's portal, no date known).
   - No placeholder dates (the most common date is used 8 times).
 
 known_issues:
@@ -18,11 +19,17 @@ known_issues:
       Mostly from 2019 on (about 120-180 a year); before 2018 only 0-18 a year, so
       counts for earlier years are incomplete.
 
+  - id: deleted_appeal_record
+    count: 16
+    description: >
+      The 16 dates that came with appeal_decision ZZZ (a deleted appeal record) are
+      NULL at load; appeal_record_deleted = true marks them.
+
   - id: same_day_appeal
     count: 2
     description: >
       Brent-DY860529 and Brent-DY860634 have appeal_decision_date = decision_date
-      (01/03/1987). See decision_date.yaml (open question 8).
+      (01/03/1987). Approximate; see decision_date.yaml (deferred open question 8).
 
 rules:
   - '"When was the appeal decided?" uses appeal_decision_date.'
@@ -30,4 +37,4 @@ rules:
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

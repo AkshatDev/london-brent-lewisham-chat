@@ -3,14 +3,14 @@ field: decision_date
 web_label: Decision date
 meaning: >
   Date of the original decision by the local planning authority named in lpa_name
-  (Brent Council for almost all; also OPDC and Hammersmith & Fulham). Not the appeal:
-  see appeal_decision_date.
+  (Brent Council for almost all; OPDC for 154). Not the appeal: see
+  appeal_decision_date.
 schema_definition: Contains the decision date for the application (DD/MM/YYYY)
-format: {type: date, pattern: DD/MM/YYYY}
+format: date   # a real date in the database; the Datahub sends DD/MM/YYYY text
 
 checks_passed:
   - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters).
-  - Where both dates exist (32,364 applications), decision_date is never before
+  - Where both dates exist (32,362 applications), decision_date is never before
     valid_date.
 
 known_issues:
@@ -24,29 +24,40 @@ known_issues:
     count: 2
     description: >
       Brent-DY860529 and Brent-DY860634 have decision_date = appeal_decision_date
-      (01/03/1987). At least one of the two dates is not real (open question 8).
+      (01/03/1987). Legacy records with no portal page; no source can say which date
+      is real. Both are approximate (flagged approximate_decision_date; deferred open
+      question 8).
 
   - id: empty_breakdown
-    count: 995
+    count: 580
     description: >
-      977 of the 995 also have no decision: see decision.yaml (known issue
-      empty_decision). The other 18 are decision_without_date.
+      564 of the 580 also have no decision: see decision.yaml (known issue
+      empty_decision). The other 16 are decision_without_date.
 
   - id: decision_without_date
-    count: 18
+    count: 16
     description: >
-      18 have a decision but no decision_date: 10 Withdrawn; 4 old applications from
+      16 have a decision but no decision_date: 10 Withdrawn; 4 old applications from
       before the Datahub (Brent-96_1985, Brent-04_1028, Brent-13_1179, Brent-16_5244);
-      2 contradictions (Brent-25_3290, Brent-26_1174, open question 4); 2 test records
-      (dropped at load).
+      2 decided early before a legal agreement (Brent-25_3290, Brent-26_1174, flagged
+      decision_not_issued).
+
+  - id: date_from_portal
+    count: 1
+    description: >
+      Brent-23_0650: decision_date 21/04/2023 comes from Brent's portal, not the
+      Datahub (outcome_source = portal_manual_check; sources.yaml).
 
 rules:
   - '"When was it decided?" uses decision_date; appeals use appeal_decision_date.'
   - Decision times (valid_date to decision_date) only where both dates exist.
-  - Records flagged approximate_decision_date have a month-only date.
+  - Records flagged approximate_decision_date have a month-only date; say "about"
+    and give the month, not the day.
+  - Records with decision_not_issued = true have no decision yet, whatever decision
+    says.
   - No decision_date is normal for applications not decided yet (Application Received,
     Application Under Consideration, Closed, Application Invalid) and for withdrawals.
 
 checked:
-  date: 2026-11-09
-  source: live API
+  date: 2026-11-10
+  source: live API; recounted on the cleaned database (core.applications)

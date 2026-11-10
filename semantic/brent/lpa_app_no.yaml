@@ -11,7 +11,9 @@ format: text
 checks_passed:
   - Every record has one; every value is a string.
   - Unique after cleaning (the only repeats were the 4 Brent/OPDC duplicates, dropped
-    by drop_opdc_duplicates in cleaning.yaml).
+    by drop_opdc_duplicates in cleaning.yaml; Brent's portal confirms Brent decided
+    them).
+  - No 55/ references: all 8 are test records, dropped at load.
 
 rules:
   - '"Tell me about 18/1022" is a lookup on lpa_app_no; it returns at most one record.'
@@ -19,4 +21,4 @@ rules:
 
 checked:
   date: 2026-11-10
-  source: live API
+  source: live API; recounted on the cleaned database (core.applications)

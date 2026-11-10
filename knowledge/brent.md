@@ -150,6 +150,11 @@ the data as it is after cleaning.
 | `borough` | `semantic/brent/borough.yaml` | `findings/brent/borough.ipynb` |
 | `legacy_record` (from `bo_system`) | `semantic/brent/legacy_record.yaml` | `findings/brent/url_planning_app.ipynb` (Step 4), `valid_date.ipynb` (Step 5) |
 | `address` (from `site_name`, `site_number`, `street_name`, `locality`, `postcode`) | `semantic/brent/address.yaml` | `findings/brent/site_name.ipynb`, `site_number.ipynb`, `street_name.ipynb`, `locality.ipynb`, `postcode.ipynb` |
+| `url_planning_app` | `semantic/brent/url_planning_app.yaml` | `findings/brent/url_planning_app.ipynb`; cleaned database |
+| `lpa_name` | `semantic/brent/lpa_name.yaml` | cleaned database (no notebook) |
+| `location_check`, `ward_2022`, `centroid`, `centroid_source`, `placeholder_centroid`, `site` (derived) | `semantic/brent/location.yaml` | cleaned database; ONS boundaries; postcodes.io |
+| flags: `outcome_source`, `appeal_record_deleted`, `decision_not_issued`, `status_stale`, `approximate_decision_date` (derived) | `semantic/brent/record_flags.yaml` | cleaned database; portal checks by a person |
+| *(where each value comes from, how to cite)* | `semantic/brent/sources.yaml` | — |
 
 ## 5. Groups of records
 

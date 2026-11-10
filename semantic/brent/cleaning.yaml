@@ -2,7 +2,7 @@
 # files describe the data as it is after these rules.
 # Applied in this order: all_records, fields, derived; then the not_loaded fields
 # are left out of the cleaned database (they stay in the local raw snapshots).
-# Actions: strip, drop_records, map, fill_null, flag, to_text, derive.
+# Actions: strip, drop_records, map, replace, fill_null, flag, to_text, derive.
 
 all_records:
   - id: strip_whitespace
@@ -13,17 +13,34 @@ all_records:
       Leading/trailing whitespace hides values from exact matches, e.g. decision
       "\tApproved" (3 records, a hidden tab).
 
+  - id: blank_to_null
+    action: fill_null
+    applies_to: all_text_fields
+    decided: 2026-11-10
+    reason: >
+      After stripping, an empty text means nothing was recorded; NULL is the one way
+      "missing" is written, so the bot never has to check for both. Affects ward (9),
+      street_name (5), postcode (4), site_name (2), secondary_street_name (1).
+
   - id: drop_test_records
     action: drop_records
     decided: 2026-11-09
+    updated: 2026-11-10
     reason: >
       Test records, not real applications ("*** TEST APPLICATION ***", "Test
-      application record for system monitoring"). All have a 55/ reference; only
-      these ids are dropped (open question 6).
+      application record for system monitoring", site "Test location"). Every 55/
+      reference in Brent is one of these 8 (open question 6, answered 2026-11-10);
+      the first list had only 3 and let 5 tests through as pending applications.
+      A new 55/ reference on a later download stops the load for a look.
     ids:
       - Brent-55_0003
       - Brent-55_0015
+      - Brent-55_0016
       - Brent-55_0100
+      - Brent-55_0200
+      - Brent-55_5561
+      - Brent-55_5562
+      - Brent-55_5563
 
   - id: drop_empty_records
     action: drop_records
@@ -50,6 +67,78 @@ all_records:
       - OPDC-18_2581
       - OPDC-19_2236
       - OPDC-19_2890
+
+  - id: drop_outside_borough
+    action: drop_records
+    decided: 2026-11-10
+    reason: >
+      borough says Brent, but the site is in Hammersmith & Fulham: decided by H&F, ward
+      COLLP (College Park & Old Oak, an H&F ward), postcode NW10 5NH in H&F
+      (postcodes.io), and the centroid 12 m outside the ONS Brent boundary. Scope is by
+      location (golden rule; open question 10, answered 2026-11-10).
+    ids:
+      - Hammersmith_&_Fulham-2025_01931_FUL
+      - Hammersmith_&_Fulham-2025_01998_PMA56
+
+  - id: outcome_from_portal
+    action: set_outcome
+    only_when_null: [status, decision]
+    sets: [status, decision]
+    source: portal_manual_check
+    expected_count: 9
+    decided: 2026-11-10
+    reason: >
+      These records have a decision_date but no status and no decision. Brent's
+      planning portal (checked by a person, 2026-11-10) shows each as Decided, with
+      the Decision Issued Date equal to our decision_date. status and decision are
+      both set to the outcome, as for other decided records; outcome_source marks
+      them. GTD = granted, REF = refused. Applied only while the Datahub still has both
+      fields empty: if it fills them, the count changes and the load stops for a
+      look. Brent-18_3324 is Decided on the portal with no decision, so it stays
+      Unknown (open question 9, answered).
+    outcomes:
+      Brent-17_5180: Refused   # portal: Refuse Planning Permission
+      Brent-18_0025: Approved   # portal: Grant Permission
+      Brent-18_0037: Approved   # portal: Grant Permission
+      Brent-18_0089: Approved   # portal: Grant Permission
+      Brent-18_0129: Refused   # portal: Refuse Planning Permission
+      Brent-18_0557: Refused   # portal: Prior approval required, REF -not lawful
+      Brent-18_2109: Approved   # portal: Prior approval required, GTD -not lawful
+      Brent-19_1286: Approved   # portal: Prior approval required, GTD -not lawful
+      Brent-23_2560: Refused   # portal: Prior approval required, REF -not lawful
+
+  - id: stale_outcome_from_portal
+    action: set_outcome
+    only_when_status: [Application Received, Application Under Consideration]
+    source: portal_manual_check
+    expected_count: 2
+    decided: 2026-11-10
+    reason: >
+      Records still pending in the Datahub long after their target date
+      (status_stale), whose real outcome a person read on Brent's planning portal
+      (2026-11-10). Applied only while the Datahub still shows them pending. Add a
+      line here for each further record checked (knowledge/brent_portal_checks.md,
+      question 5).
+    outcomes:
+      Brent-23_0650: {status: Approved, decision: Approved, decision_date: 21/04/2023}   # portal: Prior approval required and approved
+      Brent-20_4264: {status: Allowed, appeal_decision: Allowed}   # portal: Appeal decided, Appeal Allowed; no council decision shown (likely non-determination)
+
+  - id: deleted_appeal
+    action: set_when
+    when: {status: ZZZ, appeal_decision: ZZZ, decision: Refused}
+    set: {status: Refused, appeal_decision: null, appeal_decision_date: null}
+    flag: appeal_record_deleted
+    expected_count: 16
+    decided: 2026-11-10
+    reason: >
+      ZZZ is not an outcome: on Brent's planning portal the Appeal Decision of these
+      records is "Technically Deleted Record" (checked by a person on Brent-18_0301,
+      Brent-22_2833, Brent-25_1656, 2026-11-10), i.e. the appeal record was deleted.
+      The council's refusal stands, so status is Refused as for any refused
+      application without an appeal; the deleted appeal's decision and date are
+      removed, and appeal_record_deleted = true keeps the trace. Matched by value, so
+      a new deleted appeal is handled too; the expected count catches a change
+      (open question 2, answered).
 
 fields:
   status:
@@ -108,6 +197,18 @@ fields:
         - Brent-DY870124
         - Brent-DY870386
 
+  url_planning_app:
+    - id: url_space_to_hyphen
+      action: replace
+      from: /online applications/
+      to: /online-applications/
+      expected_count: 2
+      decided: 2026-11-10
+      reason: >
+        2 URLs (Brent-21_4321, Brent-87_0946) have a space where every other URL
+        (32,909) has a hyphen, so the link is broken. The hyphenated link for
+        Brent-21_4321 returns the page (HTTP 200, checked 2026-11-10).
+
   site_number:
     - id: site_number_as_text
       action: to_text
@@ -152,6 +253,78 @@ derived:
       Legacy records never have valid_date, decision_target_date or url_planning_app
       (3,528 after cleaning, none has one). bo_system itself is not a web column; this
       flag lets the bot explain the empty fields instead of treating them as gaps.
+
+  - id: decision_not_issued
+    action: derive
+    columns: [decision_not_issued]
+    from: [status, decision, decision_date]
+    when_status: [Application Received, Application Under Consideration]
+    expected_count: 2
+    decided: 2026-11-10
+    rule: >
+      decision_not_issued = true when status is one of when_status, decision is set
+      and decision_date is empty; else false. decision is kept as the Datahub gives it.
+    reason: >
+      Brent-25_3290 and Brent-26_1174 say decision Approved, but Brent's planning
+      portal shows both "Awaiting decision", subject to a Section 106 agreement not yet
+      signed (25/3290 went to committee 18/08/2026; checked by a person 2026-11-10).
+      The decision was recorded early; the application is not decided (open question
+      4). The 4 other pending applications awaiting an S106 have no decision.
+
+  - id: status_stale
+    action: derive
+    columns: [status_stale]
+    from: [status, decision_date, decision_target_date]
+    when_status: [Application Received, Application Under Consideration]
+    stale_after_days: 365
+    decided: 2026-11-10
+    rule: >
+      status_stale = true when status is one of when_status, decision_date is empty
+      and decision_target_date is more than stale_after_days before the snapshot
+      date; or the record is listed in ids. Computed at load (it depends on the
+      snapshot date), after the portal outcomes; 34 on the 2026-11-10 snapshot
+      (33 by date, 1 listed).
+    ids:
+      - Brent-96_1985   # 1996, "Appeal In Progress"; Brent's portal also still says "Appeal lodged", no appeal decision, 0 documents (checked by a person 2026-11-10)
+    reason: >
+      The Datahub stops updating some applications: 32 of the 35 found had not been
+      updated for over a year, and the 3 checked on the portal had moved on
+      (approved; appeal allowed; page removed). The bot must not report them as
+      pending (open question 5).
+
+  - id: placeholder_centroid
+    action: derive
+    columns: [centroid, centroid_source, placeholder_centroid]
+    from: [centroid.lat, centroid.lon, postcode, site_name]
+    decided: 2026-11-10
+    rule: >
+      A centroid south of latitude 50 is a placeholder (26 records, all at 49.76681,
+      -7.55716: grid origin 0,0 in WGS84, in the sea off Cornwall). Set
+      placeholder_centroid = true and centroid to the postcode's centroid from
+      postcodes.io when the postcode (postcode field, else a full postcode in
+      site_name) is in Brent (19 records), else NULL (7). centroid_source is
+      "datahub" or "postcodes.io". Lookups are cached in
+      data/external/brent/postcode_centroids.json, Brent postcodes only.
+    reason: >
+      A point in the sea would put the record in the wrong place on every map and
+      distance query; its address is in Brent.
+
+  - id: location_check
+    action: derive
+    columns: [location_check, ward_2022]
+    from: [centroid]
+    decided: 2026-11-10
+    rule: >
+      Compare the centroid with the ONS Brent boundary (December 2024, BFC):
+      inside; boundary_edge (outside by at most 20 m; 36 records, nearly all
+      "Street Record" rows on boundary roads: Edgware Road, Harrow Road, Acton Lane,
+      Carlton Vale); no_centroid (placeholder with no Brent postcode); anything else
+      stops the load. ward_2022 = the ONS 2022 ward that contains the centroid
+      (NULL when it is not inside).
+    reason: >
+      Confirms by location that every record is in Brent (golden rule; open question
+      11 and the rest of 10). The boundary follows road centre lines, so sites on
+      those roads land a few metres either side.
 
 not_loaded:
   - field: site_name

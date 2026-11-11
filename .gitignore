@@ -35,3 +35,6 @@ CLAUDE.md
 
 # Logfire's local credentials folder (from `logfire auth`)
 .logfire/
+
+# Claude Code plugin skills (local tooling, not part of the app)
+.agents/

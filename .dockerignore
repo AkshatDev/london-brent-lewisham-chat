@@ -19,10 +19,14 @@ docs/_build
 tests/
 CLAUDE.md
 *.xlsx
-# Working notes
+# Working notes and the assignment brief (not needed at runtime)
 PLAN.md
+APIplan.md
+BRENT_AGENT.md
+*.pdf
 knowledge/
-semantic/
+# semantic/ is NOT ignored: the app reads the YAMLs at runtime (prompt, tool values,
+# cleaning rules, live_api.yaml), so they must be in the image.
 
 # EDA notebook and its data: not needed at runtime
 findings/
@@ -32,3 +36,6 @@ findings/
 
 # Logfire's local credentials folder (from `logfire auth`)
 .logfire/
+
+# Claude Code plugin skills (local tooling, not part of the app)
+.agents/

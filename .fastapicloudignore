@@ -40,3 +40,6 @@ findings/
 
 # Claude Code plugin skills (local tooling, not part of the app)
 .agents/
+
+# pdfs
+*.pdf

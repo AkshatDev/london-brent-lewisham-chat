@@ -1,7 +1,9 @@
 """FastAPI application: wiring, middleware and the health check.
 
 ``create_app`` builds the app (settings, logging, request logging, correlation
-IDs). ``app`` at the bottom is what the server runs.
+IDs, the ``/v1`` routers). ``lifespan`` loads the semantic layer and creates and
+closes the shared OpenAI and Datahub clients. ``app`` at the bottom is what the
+server runs.
 """
 
 import logging
@@ -13,11 +15,18 @@ import logfire
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from openai import AsyncOpenAI
 
+from .chat import build_instructions, build_tools
 from .config import Settings
+from .datahub import build_datahub_client
+from .llm import build_openai_client
 from .log_config import configure_logging
 from .observability import configure_logfire
+from .routers import chat
 from .schemas import Health
+from .semantic import SemanticError, load_semantic
+from .sessions import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -30,27 +39,74 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     its own logging setup after importing the app, which would overwrite ours.
     Records also go to Logfire, which ``create_app()`` has configured already.
 
-    One ``app started`` line then says where the app thinks it runs, so a deploy
-    that forgot ``ENVIRONMENT=production`` shows ``local`` in its first log line.
+    The semantic layer (the borough's YAMLs) is loaded next, once. An invalid or
+    inconsistent YAML is logged at ERROR and stops the app: answering with a broken
+    description of the data would give wrong answers, which is worse than not
+    starting. Brent only for now; Lewisham is added when its YAMLs exist. The chat
+    instructions and tools are built from it once, here, so every request sends the
+    same prompt (which OpenAI's prompt caching can reuse). The session store starts
+    empty: sessions live as long as the process.
+
+    The OpenAI and Datahub clients are created here (``None`` without their key or
+    header) and closed at shutdown, so their pools of HTTPS connections (and the
+    Datahub cache) live exactly as long as the app. Creating them makes no network
+    call, so start-up never waits for either service.
+
+    One ``app started`` line then says where the app thinks it runs and what is
+    configured, so a deploy that forgot ``ENVIRONMENT=production``, the OpenAI key
+    or the Datahub header shows it in its first log line.
 
     Args:
-        app: The application being started; its settings give the log level and
-            the environment.
+        app: The application being started; its settings give the log level, the
+            environment, the semantic folder and the OpenAI and Datahub settings.
 
     Yields:
         Control to FastAPI while the app is serving requests.
+
+    Raises:
+        SemanticError: If the semantic YAMLs are missing, invalid or inconsistent.
     """
     settings = app.state.settings
     configure_logging(settings.log_level, to_logfire=True)
+    try:
+        app.state.semantic = load_semantic("brent", settings.semantic_dir)
+    except SemanticError as exc:
+        logger.error("semantic layer invalid", extra={"error": str(exc)})
+        raise
+    app.state.instructions = build_instructions(app.state.semantic)
+    app.state.tools = build_tools(app.state.semantic)
+    app.state.sessions = SessionStore(
+        idle_ttl_s=settings.session_idle_ttl_s,
+        max_count=settings.session_max_count,
+        max_turns=settings.session_max_turns,
+    )
+    # Kept in locals too, so shutdown closes the clients created here even if
+    # app.state was changed meanwhile (tests put fake clients there).
+    openai_client = build_openai_client(settings)
+    datahub = build_datahub_client(settings, "brent")
+    app.state.openai = openai_client
+    app.state.datahub = datahub
     logger.info(
         "app started",
         extra={
             "environment": settings.environment,
             # Whether traces leave the machine; the token itself is never logged.
             "sending_to_logfire": settings.logfire_token is not None,
+            # Whether chat can work; the key itself is never logged.
+            "openai_configured": openai_client is not None,
+            "openai_model": settings.openai_model,
+            # Whether the tools can reach the Datahub; the header is never logged.
+            "datahub_configured": datahub is not None,
+            "semantic_fields": len(app.state.semantic.fields),
         },
     )
-    yield
+    try:
+        yield
+    finally:
+        if openai_client is not None:
+            await openai_client.close()
+        if datahub is not None:
+            await datahub.aclose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -111,6 +167,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """  # noqa: D301 (\f hides the rest from /docs)
         return Health(status="ok")
 
+    # POST /chat at the root, exactly as the assignment specifies; the status
+    # check stays under /v1.
+    app.include_router(chat.chat_router)
+    app.include_router(chat.router)
+
     # Added last so it runs first: every request gets an ID before it is logged,
     # and the ID is returned in the X-Request-ID response header.
     app.add_middleware(CorrelationIdMiddleware)
@@ -120,6 +181,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # configured before it. (The server's logging setup doesn't touch Logfire.)
     configure_logfire(app.state.settings)
     logfire.instrument_fastapi(app)
+
+    # A span per OpenAI call (model, duration, tokens; for chat also the prompt
+    # and answer) inside the request's trace. The class, not one client, so every
+    # client is covered, fakes in tests too; repeating it adds no duplicate spans.
+    # Accepted trade-off: a failed call's span keeps OpenAI's error text, which
+    # Logfire never scrubs; for a wrong key that includes the key's last 4 chars.
+    logfire.instrument_openai(AsyncOpenAI)
     return app
 
 

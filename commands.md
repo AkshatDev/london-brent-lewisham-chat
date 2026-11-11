@@ -22,7 +22,15 @@ curl -si localhost:8000/health -H "X-Request-ID: $(python3 -c 'import uuid; prin
 # a caller's ID is kept only if it is a valid UUID4; anything else is replaced with a new one
 LOG_LEVEL=DEBUG uv run fastapi dev                       # more logs
 LOGFIRE_CONSOLE=true uv run fastapi dev                  # also print Logfire spans in the terminal
+
+curl -i localhost:8000/v1/chat/status    # 200 {"status":"ok","model":...} if OpenAI can be used
+OPENAI_API_KEY= uv run fastapi dev       # run without a key: chat/status answers 503 "not_configured"
 ```
+
+Chat status: `200 ok`; `503 not_configured` (no `OPENAI_API_KEY`); `503 unavailable`
+(OpenAI down, rate-limited, or key/model rejected: the log line says which); `504`
+(no answer within `OPENAI_TIMEOUT_S`). It costs no tokens. The `app started` line shows
+`openai_configured` and `openai_model`.
 
 Logfire: traces are sent only when `LOGFIRE_TOKEN` is set in `.env` (write token from
 the Logfire project: Settings → Write tokens). Edit `.env` in an editor; never paste the
@@ -79,9 +87,12 @@ uv run fastapi cloud logs                             # stream live
 uv run fastapi cloud env set ENVIRONMENT production
 uv run fastapi cloud logs --no-follow --since 30m | grep '"app started"'   # check: "environment": "production"
 
-# Set a secret from .env via stdin (never on the command line), e.g. the Logfire token:
+# Set secrets from .env via stdin (never on the command line): the Logfire token, the OpenAI key
 grep '^LOGFIRE_TOKEN=' .env | cut -d= -f2- \
-  | uv run fastapi cloud env set LOGFIRE_TOKEN --value-stdin --secret
+  | uv run fastapi cloud env set LOGFIRE_TOKEN --value-stdin --secret --no-redeploy
+grep '^OPENAI_API_KEY=' .env | cut -d= -f2- \
+  | uv run fastapi cloud env set OPENAI_API_KEY --value-stdin --secret
+curl -s https://<app-url>/v1/chat/status                  # check: {"status":"ok",...}
 ```
 
 `env set` redeploys the app by default; add `--no-redeploy` to set several variables

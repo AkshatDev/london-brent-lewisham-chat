@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Literal
 
 from psycopg.conninfo import make_conninfo
-from pydantic import SecretStr, field_validator
+from pydantic import (
+    Field,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    SecretStr,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -24,6 +31,10 @@ class Settings(BaseSettings):
     Values come from environment variables (case-insensitive), then a local
     ``.env`` file, then the defaults below. ``.env`` is for local development only:
     it is never committed or deployed.
+
+    One deliberate exception to "missing config stops the app": the OpenAI key is
+    optional, so the app (and ``/health``) runs without it and the chat endpoints
+    say that chat is not configured. An invalid value still stops the app.
     """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -47,13 +58,77 @@ class Settings(BaseSettings):
     trying Logfire out locally: the text is mixed into the JSON log lines on stdout,
     so it stays off in production and in tests."""
 
-    @field_validator("logfire_token", mode="before")
-    @classmethod
-    def _blank_token_is_no_token(cls, value: object) -> object:
-        """Treat ``LOGFIRE_TOKEN=`` (as in ``.env.example``) as not set.
+    openai_api_key: SecretStr | None = None
+    """OpenAI API key. Optional: without it the app runs, and the chat endpoints
+    answer 503 "not configured". A secret: kept in ``.env`` locally, a secret env
+    var when deployed, never logged."""
 
-        Without this an empty value becomes an empty secret, and Logfire would try
-        to send with it instead of sending nothing.
+    openai_model: str = Field(default="gpt-6-luna", min_length=1)
+    """OpenAI model the chat uses. A setting so it can change without a code
+    change; ``/v1/chat/status`` checks that the key can use it."""
+
+    openai_timeout_s: PositiveFloat = 30.0
+    """Seconds to wait for one OpenAI request before giving up (504). The SDK's own
+    default is 10 minutes, far too long for someone waiting for an answer."""
+
+    openai_max_retries: NonNegativeInt = 2
+    """How often the SDK retries a failed request (connection errors, 429, 5xx),
+    with backoff. The worst-case wait is about (retries + 1) x the timeout."""
+
+    openai_max_output_tokens: PositiveInt = 1000
+    """Most tokens the model may write per call. Answers are a few sentences; the
+    limit bounds the cost of one call if the model runs on."""
+
+    chat_max_rounds: PositiveInt = 5
+    """Most model calls for one question (each tool round is one). A confused model
+    stops here and gets a fixed, honest answer instead of looping."""
+
+    session_max_turns: PositiveInt = 10
+    """Questions and answers kept per session for follow-ups; older ones are
+    dropped, so the model's input (and cost) stays bounded."""
+
+    session_idle_ttl_s: PositiveFloat = 3600.0
+    """A session unused this long (seconds) is forgotten."""
+
+    session_max_count: PositiveInt = 1000
+    """Most sessions kept in memory; the least recently used goes first."""
+
+    semantic_dir: Path = Path("semantic")
+    """Folder with the semantic YAMLs, one subfolder per borough (``brent/``). They
+    are read once at start-up; an invalid file stops the app. Relative to the
+    working directory: the project root locally, ``/app`` in the Docker image."""
+
+    datahub_url: str = Field(
+        default="https://planningdata.london.gov.uk/api-guest", min_length=1
+    )
+    """Base URL of the Planning London Datahub guest API, which the chat tools query
+    live (the brief requires it)."""
+
+    datahub_allow_request: SecretStr | None = None
+    """Value of the ``X-API-AllowRequest`` header the Datahub requires. Optional, like
+    the OpenAI key: without it the app runs and the tools answer "not configured".
+    Kept as a secret and never logged."""
+
+    datahub_timeout_s: PositiveFloat = 10.0
+    """Seconds to wait for one Datahub request (504 after). Much shorter than the
+    pipeline's bulk-download timeout: someone is waiting for the answer."""
+
+    datahub_cache_ttl_s: PositiveFloat = 600.0
+    """How long a Datahub answer is reused for the same query (the brief's "basic
+    caching"). The data changes slowly; 10 minutes keeps answers fresh enough."""
+
+    datahub_cache_max_entries: PositiveInt = 256
+    """Most answers kept in the cache; the oldest goes first, so memory stays bounded."""
+
+    @field_validator(
+        "logfire_token", "openai_api_key", "datahub_allow_request", mode="before"
+    )
+    @classmethod
+    def _blank_secret_is_no_secret(cls, value: object) -> object:
+        """Treat a blank secret (e.g. ``LOGFIRE_TOKEN=`` from ``.env.example``) as not set.
+
+        Without this an empty value becomes an empty secret, and the client would
+        try to use it instead of knowing there is none.
 
         Args:
             value: The raw value from the environment or ``.env``.

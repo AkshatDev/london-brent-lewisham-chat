@@ -1,6 +1,9 @@
 # Field facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
 field: valid_date
 web_label: Valid date
+meaning: >
+  The date the application became valid. "Validated in <year>" means valid_date in
+  that year. Missing for all legacy records (imported from Brent's old system).
 schema_definition: Contains the date at which the application is valid (DD/MM/YYYY)
 format: date   # a real date in the database; the Datahub sends DD/MM/YYYY text
 

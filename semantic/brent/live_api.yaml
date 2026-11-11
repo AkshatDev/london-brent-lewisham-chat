@@ -1,0 +1,162 @@
+# Live-API facts for the chat bot, Brent only (golden rule).
+# The other files in this folder describe the cleaned database and stay the truth for
+# it. This file says what of that holds when the bot reads the live Datahub API instead:
+# which fields to request, which ones reach the model (each explained by its own YAML),
+# which exist only in the database, and the rules that differ live.
+field: live_api
+meaning: >
+  Every live record is fetched with the scope filter, re-checked in scope, and cleaned
+  per record with clean_record and cleaning.yaml (the same code and rules as the
+  pipeline). Only fields listed under returned reach the model; anything else the
+  Datahub sends is dropped before the model sees it.
+
+# Raw fields asked for with Elasticsearch _source: exactly what clean_record needs as
+# input. Everything else (site polygons, nested lists, ...) is not downloaded.
+request_fields:
+  - id
+  - borough            # scope check
+  - lpa_name           # scope check
+  - lpa_app_no
+  - status
+  - decision
+  - application_type
+  - description
+  - appeal_decision
+  - url_planning_app
+  - bo_system          # -> legacy_record
+  # ward is a clean_record input too, but not requested: it must not be used live
+  # (no_ward_answers), and a missing field simply arrives as None.
+  - valid_date
+  - decision_date
+  - decision_target_date
+  - appeal_decision_date
+  - site_name          # -> address (with the next four)
+  - site_number
+  - street_name
+  - locality
+  - postcode
+  - last_updated
+
+# Fields returned to the model after cleaning; `see` names the file that explains each.
+returned:
+  - {field: lpa_app_no, see: lpa_app_no.yaml}
+  - {field: id, see: sources.yaml}   # for citations only
+  - {field: lpa_name, see: lpa_name.yaml}
+  - {field: borough, see: borough.yaml}
+  - {field: application_type, see: application_type.yaml}
+  - {field: description, see: description.yaml}
+  - {field: address, see: address.yaml}
+  - {field: address_kind, see: address.yaml}
+  - {field: status, see: status.yaml}
+  - {field: decision, see: decision.yaml}
+  - {field: valid_date, see: valid_date.yaml}
+  - {field: decision_date, see: decision_date.yaml}
+  - {field: decision_target_date, see: decision_target_date.yaml}
+  - {field: appeal_decision, see: appeal_decision.yaml}
+  - {field: appeal_decision_date, see: appeal_decision_date.yaml}
+  - {field: url_planning_app, see: url_planning_app.yaml}
+  - {field: legacy_record, see: legacy_record.yaml}
+  - {field: decision_not_issued, see: record_flags.yaml}
+  - {field: status_stale, see: record_flags.yaml}   # computed live: see live_rules
+  - {field: appeal_record_deleted, see: record_flags.yaml}
+  - {field: approximate_decision_date, see: record_flags.yaml}
+  - {field: outcome_source, see: record_flags.yaml}
+  - {field: last_updated, see: sources.yaml}
+
+# In the database only: they need the ONS boundaries and PostGIS at load time.
+database_only:
+  - {field: location_check, see: location.yaml}
+  - {field: ward_2022, see: location.yaml}
+  - {field: centroid, see: location.yaml}
+  - {field: centroid_source, see: location.yaml}
+  - {field: placeholder_centroid, see: location.yaml}
+  - {field: site, see: location.yaml}
+
+live_rules:
+  - id: status_stale_today
+    rule: >
+      status_stale is computed per record with the status_stale rule in cleaning.yaml
+      (when_status, stale_after_days, ids), measured from today instead of the snapshot
+      date. So it can differ from the database's 34.
+  - id: counts_exclude_dropped
+    rule: >
+      Counts come from the Datahub's _count. Records the pipeline drops are excluded in
+      the query: the ids of drop_test_records, drop_opdc_duplicates and
+      drop_outside_borough; the drop_empty_records condition (status, decision,
+      decision_date and description all empty); lpa_app_no starting with 55/ (test
+      references).
+  - id: counts_use_published_values
+    rule: >
+      Counts filter on the values the Datahub publishes. Corrections applied per record
+      (outcome_from_portal, stale_outcome_from_portal, deleted_appeal) are not in them,
+      so a count by decision or status can differ slightly from the cleaned database.
+      Say so when the difference matters; record details do include the corrections.
+  - id: no_ward_answers
+    rule: >
+      Live records have no ward_2022, and the published ward must not be used (see
+      location.yaml). Do not answer "in ward X" questions; say the bot does not cover
+      wards yet.
+
+# Default filters, from "Default filters for answers" in semantic/database_schema.md,
+# adapted to live data. Tools apply them to every query of that kind; code reads them
+# from here. Flag exclusions name the rule in cleaning.yaml (`derived`) that defines
+# the flag, so its parameters (statuses, days, ids) live in one place only.
+default_filters:
+  - id: decided
+    applies_to: counts and lists by council decision (approved, refused, ...)
+    filter_on: decision          # never status (decision.yaml)
+    exclude_flags: [decision_not_issued]
+  - id: pending
+    applies_to: '"pending", "under consideration", "awaiting a decision"'
+    filter_on: status
+    status_in: [Application Received, Application Under Consideration]
+    exclude_flags: [status_stale, decision_not_issued]
+  - id: appeals
+    applies_to: appeal outcomes
+    filter_on: appeal_decision
+    exclude_rules: [deleted_appeal]   # live records still carry ZZZ (cleaning.yaml)
+  - id: year
+    applies_to: '"in <year>"'
+    date_field: {decisions: decision_date, submissions: valid_date}
+    rule: >
+      Say which date is used. Legacy records have no valid_date, so counts by
+      valid_date leave them out (valid_date.yaml).
+  - id: decision_times
+    applies_to: decision times, "on time"
+    rule: >
+      Only where both dates exist: valid_date and decision_target_date (recorded from
+      2018-01-24 on, decision_target_date.yaml).
+
+# How each excluded flag becomes a live query condition. The condition is the one in
+# cleaning.yaml's rule of the same id; status_stale is measured from today
+# (status_stale_today above).
+flag_conditions:
+  decision_not_issued: >
+    status in when_status, decision present, decision_date missing.
+  status_stale: >
+    status in when_status, decision_date missing, decision_target_date more than
+    stale_after_days before today; or id in ids.
+
+# The one line the prompt carries about everything not listed above.
+uncovered: >
+  The Planning London Datahub publishes more about each application than this assistant
+  covers yet (for example homes and residential units, floorspace, site constraints,
+  buildings, phasing and wards). If a question needs those, say it is not covered yet
+  rather than guess.
+
+citation:
+  live_query:
+    cite_as: 'Planning London Datahub API (live): <what was counted or searched>, retrieved <retrieved_at>.'
+  live_record:
+    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), retrieved <retrieved_at>.'
+  other_sources: >
+    Unchanged from sources.yaml: brent_portal_manual_check (outcome_source =
+    portal_manual_check, appeal_record_deleted, decision_not_issued) and
+    brent_portal_link (url_planning_app).
+
+checked:
+  date: 2026-11-11
+  source: >
+    pipeline/clean.py (inputs of clean_record), cleaning.yaml, the live index mapping
+    (valid_date and decision_date are dates, dd/MM/yyyy; decision, status,
+    application_type and borough have .raw; lpa_app_no has no .raw).

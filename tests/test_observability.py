@@ -3,11 +3,15 @@
 import json
 from pathlib import Path
 
+import logfire
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pydantic import ValidationError
 
 from london_brent_lewisham_chat import app as app_module
+from london_brent_lewisham_chat import observability
 from london_brent_lewisham_chat.app import create_app
 from london_brent_lewisham_chat.config import Settings
 from london_brent_lewisham_chat.observability import configure_logfire
@@ -112,3 +116,61 @@ def test_start_up_says_traces_are_sent_but_never_logs_the_token(
     assert "secret-value" not in out
     [line] = start_up_lines(out)
     assert line["sending_to_logfire"] is True
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "kept"),
+    [
+        ("session_id", "demo-1", True),  # matches "session", but is not a secret
+        ("local_authority", "Brent", True),  # matches "auth", but is not a secret
+        ("session_cookie", "c00kie", False),  # same pattern, not on the allow-list
+        ("auth_token", "t0k3n", False),
+        ("password", "hunter2", False),
+        ("api_key", "sk-abc", False),
+    ],
+)
+def test_scrubbing_lets_through_only_the_allow_listed_keys(
+    monkeypatch: pytest.MonkeyPatch, key: str, value: str, kept: bool
+) -> None:
+    exporter = InMemorySpanExporter()
+    configure = logfire.configure
+
+    def with_exporter(**options: object) -> None:
+        # Our configuration, plus an in-memory exporter to read the span back.
+        configure(
+            **options,  # type: ignore[arg-type]
+            additional_span_processors=[SimpleSpanProcessor(exporter)],
+        )
+
+    monkeypatch.setattr(observability.logfire, "configure", with_exporter)
+    configure_logfire(Settings())
+    with logfire.span("check", **{key: value}):
+        pass
+
+    [span] = [s for s in exporter.get_finished_spans() if s.name == "check"]
+    shown = span.attributes[key]
+    assert (shown == value) is kept
+    if not kept:
+        assert str(shown).startswith("[Scrubbed due to")
+
+
+def test_scrubbing_reaches_inside_tool_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    configure = logfire.configure
+    monkeypatch.setattr(
+        observability.logfire,
+        "configure",
+        lambda **o: configure(
+            **o, additional_span_processors=[SimpleSpanProcessor(exporter)]
+        ),
+    )
+    configure_logfire(Settings())
+    with logfire.span("tool", args={"local_authority": "Brent", "password": "hunter2"}):
+        pass
+
+    [span] = [s for s in exporter.get_finished_spans() if s.name == "tool"]
+    args = json.loads(span.attributes["args"])
+    assert args["local_authority"] == "Brent"
+    assert args["password"].startswith("[Scrubbed due to")

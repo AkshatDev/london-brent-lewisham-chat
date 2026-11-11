@@ -4,6 +4,7 @@ Every module logs through ``logging.getLogger(__name__)``; this module decides
 where those records go and what they look like (one JSON object per line).
 """
 
+import logging
 from logging.config import dictConfig
 from typing import Any
 
@@ -39,6 +40,11 @@ def configure_logging(level: str = "INFO", *, to_logfire: bool = False) -> None:
         handlers["logfire"] = {
             "class": "logfire.LogfireLoggingHandler",
             "filters": ["correlation_id"],
+            # Records logged while Logfire suppresses instrumentation (e.g. the
+            # OpenAI SDK's "HTTP Request" line inside an OpenAI call) go to this
+            # fallback, by default a plain-text copy on stderr. The stdout handler
+            # already writes them as JSON, so the copy is dropped.
+            "fallback": logging.NullHandler(),
         }
 
     config = {

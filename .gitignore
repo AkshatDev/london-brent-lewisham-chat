@@ -29,12 +29,15 @@ CLAUDE.md
 docs/_build
 CLAUDE.md
 *.xlsx
-# Raw snapshots and external reference files: local only (PLAN.md §11)
+# Raw snapshots and external reference files: local only
 /data/
 /findings/data/*.jsonl
 
 # Logfire's local credentials folder (from `logfire auth`)
 .logfire/
+
+# Agent working notes (plans, handovers): local only
+agent_context/
 
 # Claude Code plugin skills (local tooling, not part of the app)
 .agents/

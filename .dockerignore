@@ -19,10 +19,8 @@ docs/_build
 tests/
 CLAUDE.md
 *.xlsx
-# Working notes and the assignment brief (not needed at runtime)
-PLAN.md
-APIplan.md
-BRENT_AGENT.md
+# Agent working notes and the assignment brief (not needed at runtime)
+agent_context/
 *.pdf
 knowledge/
 # semantic/ is NOT ignored: the app reads the YAMLs at runtime (prompt, tool values,
@@ -31,7 +29,7 @@ knowledge/
 # EDA notebook and its data: not needed at runtime
 findings/
 
-# Raw snapshots and external reference files: local only (PLAN.md §11)
+# Raw snapshots and external reference files: local only
 /data/
 
 # Logfire's local credentials folder (from `logfire auth`)

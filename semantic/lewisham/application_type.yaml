@@ -1,0 +1,41 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: application_type
+web_label: Application type
+meaning: >
+  The broad kind of application, in 3 groups. It is not the outcome: the outcome is
+  in decision.
+schema_definition: Describes the generic Application Type, see Field Values tab for all Application Types
+format: text
+
+# Values after cleaning (live API, 2026-11-11), most common first.
+values:
+  - All Other
+  - Householder
+  - Prior Approval
+
+checks_passed:
+  - Every record has a value, all values are schema values, no case or whitespace
+    variants; every value is a string.
+
+known_issues:
+  - id: prior_approval_typed_all_other
+    description: >
+      Some Prior Approvals are typed All Other: Lewisham-DC_22_129646 has
+      application_type All Other but application_type_full "Prior Approval: Demolition
+      of building". How many more there are is not checked, so counts of Prior
+      Approvals may be low.
+
+rules:
+  - 'Prior Approval is a kind of application, not an outcome. Of Lewisham''s 1,598
+    Prior Approvals (before cleaning), 701 are Not Required, 625 Refused and 192
+    Approved; the rest Withdrawn (45), Closed (2) or no decision (33). Use decision for
+    the outcome.'
+  - Not Required is its own decision value, not Approved; count it separately and give
+    it as recorded. (Its likely meaning, that the council's prior approval was not
+    needed, is not confirmed.)
+  - Only these 3 groups are known; more specific types (e.g. change of use, listed
+    building consent) can't be answered from this field.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/application_type.ipynb, Steps 1-3)

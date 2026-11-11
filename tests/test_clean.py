@@ -65,9 +65,15 @@ def test_all_eight_test_records_are_dropped() -> None:
     assert result.dropped["drop_test_records"] == 8
 
 
-def test_an_unlisted_55_reference_stops_the_load() -> None:
-    with pytest.raises(ValueError, match="unlisted 55/"):
-        run(record(id="Brent-55_9999", lpa_app_no="55/9999"))
+def test_an_unlisted_55_reference_is_dropped_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    result = run(record(id="Brent-55_9999", lpa_app_no="55/9999"))
+    assert result.rows == []
+    assert result.dropped["drop_test_records"] == 1
+    assert any(
+        r.getMessage() == "unlisted test reference dropped" for r in caplog.records
+    )
 
 
 def test_empty_records_and_records_located_outside_brent_are_dropped() -> None:
@@ -243,3 +249,77 @@ def test_portal_outcome_for_a_stale_record_sets_several_fields_while_still_pendi
     )
     assert rows[2]["status"] == "Refused"
     assert rows[2]["outcome_source"] == "datahub"
+
+
+# --- Lewisham: the same code, Lewisham's cleaning.yaml --------------------------------
+
+LEWISHAM = clean.load_rules(
+    Path(__file__).parents[1] / "semantic" / "lewisham" / "cleaning.yaml"
+)
+
+
+def lewisham(**fields: Any) -> dict[str, Any]:  # noqa: ANN401
+    """A minimal real-looking Lewisham record."""
+    base = {
+        "id": "Lewisham-DC_24_130001",
+        "borough": "Lewisham",
+        "lpa_name": "Lewisham",
+        "lpa_app_no": "DC/24/130001",
+        "status": "Approved",
+        "decision": "Approved",
+        "decision_date": "02/03/2024",
+        "valid_date": "05/01/2024",
+        "description": "Single storey rear extension",
+        "site_name": "1 Example Road, London, SE13 1AA",
+        "bo_system": "Uniform",
+    }
+    return base | fields
+
+
+def run_lewisham(*records: dict[str, Any]) -> clean.Result:
+    result = clean.Result()
+    for r in records:
+        clean.clean_record(r, LEWISHAM, "lewisham", result, {})
+    return result
+
+
+def test_lewisham_cleans_without_brents_derived_rules() -> None:
+    [row] = run_lewisham(lewisham()).rows
+    assert row["decision_not_issued"] is False  # no such rule for Lewisham
+    assert row["approximate_decision_date"] is False
+    assert row["outcome_source"] == "datahub"
+
+
+def test_lewisham_status_is_copied_from_decision_when_empty() -> None:
+    [row] = run_lewisham(lewisham(status=None, decision="Refused")).rows
+    assert row["status"] == "Refused"  # status_from_decision (copy_when_null)
+
+
+def test_lewisham_null_locality_text_never_reaches_the_address() -> None:
+    [row] = run_lewisham(
+        lewisham(
+            site_name="12",
+            street_name="Lewisham Way",
+            locality="NULL",
+            postcode="SE4 1UT",
+        )
+    ).rows
+    assert row["address"] == "12, Lewisham Way, SE4 1UT"  # "NULL" -> null first
+
+
+def test_lewisham_legacy_record_comes_from_its_derived_rule() -> None:
+    rows = run_lewisham(
+        lewisham(id="Lewisham-1", bo_system="FME Legacy Data Import"),
+        lewisham(id="Lewisham-2", bo_system="Portal"),  # ordinary, not legacy
+    ).rows
+    assert [r["legacy_record"] for r in rows] == [True, False]
+
+
+def test_lewisham_test_records_are_dropped_listed_or_not() -> None:
+    listed = LEWISHAM["all_records"][2]["ids"][0]
+    result = run_lewisham(
+        lewisham(id=listed, lpa_app_no="TEST/18/022222"),
+        lewisham(id="Lewisham-TEST_99_000001", lpa_app_no="TEST/99/000001"),
+    )
+    assert result.rows == []
+    assert result.dropped["drop_test_records"] == 2

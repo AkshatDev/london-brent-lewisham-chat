@@ -1,0 +1,28 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the live data after cleaning.yaml.
+# A derived column: computed for each live record with the status_stale rule in
+# cleaning.yaml, measured from today (status_stale_today in live_api.yaml). Moved here
+# from record_flags.yaml.
+field: status_stale
+web_label: null   # derived; not on the website
+meaning: >
+  True when the status is probably out of date: still Application Received or Under
+  Consideration, with no decision date, more than stale_after_days (cleaning.yaml)
+  after the target date; or listed after a portal check (Brent-96_1985: "Appeal In
+  Progress" since 1996, while Brent's portal still says "Appeal lodged").
+format: boolean
+
+checks_passed:
+  - 34 records on the 2026-11-10 snapshot (33 by date, 1 listed). Live, the number can
+    change, since it is measured from today.
+
+rules:
+  - Don't report or count as pending (the pending default filter in live_api.yaml
+    leaves these out of counts).
+  - Say the record hasn't been updated and give url_planning_app.
+  - When the answer depends on this, say so.
+
+checked:
+  date: 2026-11-11
+  source: >
+    record_flags.yaml (2026-11-10, cleaned database snapshot); cleaning.yaml rule
+    status_stale; Brent's planning portal (sources.yaml)

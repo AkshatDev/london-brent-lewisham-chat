@@ -13,6 +13,7 @@ that text: an accepted trade-off, so this rule covers our own logs and responses
 """
 
 import logging
+import re
 from dataclasses import asdict
 from typing import Any, Literal
 
@@ -48,12 +49,12 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 @chat_router.post("/chat", responses=ERROR_RESPONSES)
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
-    """Answer a question about planning applications in Brent, with citations.
+    """Answer a question about planning applications in Brent or Lewisham, with citations.
 
     Send the same `session_id` for follow-up questions ("how many of those were
     refused?"); a new one starts a new conversation. Facts come from the live
-    Planning London Datahub; each answer lists the sources it used. Lewisham and
-    other areas are not covered yet.
+    Planning London Datahub; each answer lists the sources it used. Other areas are
+    not covered.
     \f
     Args:
         body: The question and the session id (validated: 422 if invalid).
@@ -70,7 +71,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     settings = state.settings
     if state.openai is None:
         raise HTTPException(503, f"Chat is not configured: {NOT_CONFIGURED}")
-    if state.datahub is None:
+    if state.areas is None:
         raise HTTPException(503, f"Chat is not configured: {DATAHUB_NOT_CONFIGURED}")
 
     session = state.sessions.get(body.session_id)
@@ -83,8 +84,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
                 model=settings.openai_model,
                 instructions=state.instructions,
                 tools=state.tools,
-                semantic=state.semantic,
-                datahub=state.datahub,
+                areas=state.areas,
                 max_rounds=settings.chat_max_rounds,
                 max_output_tokens=settings.openai_max_output_tokens,
             )
@@ -98,6 +98,8 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
         # Kept only when the question was answered, so a failed turn leaves no
         # half-finished history behind.
         session.add_turn(result.turn, state.sessions.max_turns)
+        session.remember_citations(result.citations)
+        citations = _with_earlier_citations(result.answer, result.citations, session)
 
     logger.info(
         "chat finished",
@@ -117,7 +119,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     )
     return ChatResponse(
         answer=result.answer,
-        citations=[CitationOut(**asdict(c)) for c in result.citations],
+        citations=[CitationOut(**asdict(c)) for c in citations],
         session_id=body.session_id,
     )
 
@@ -158,6 +160,34 @@ async def chat_status(request: Request, response: Response) -> ChatStatus:
         return failed(code, "unavailable", detail)
 
     return ChatStatus(status="ok", model=model)
+
+
+def _with_earlier_citations(
+    answer_text: str,
+    citations: list[Any],
+    session: Any,  # noqa: ANN401
+) -> list[Any]:
+    """Add the earlier citations an answer's markers point to.
+
+    A follow-up may repeat a fact from an earlier answer with its marker ("722 in
+    Brent [c2]"); without this, the response would show a marker with no source.
+    Markers that match no citation of the session are ignored.
+
+    Args:
+        answer_text: The answer, with markers such as ``[c2]``.
+        citations: This turn's citations.
+        session: The session, which keeps every citation it issued.
+
+    Returns:
+        This turn's citations, then the earlier ones the answer mentions, in order.
+    """
+    own = {c.id for c in citations}
+    earlier = [
+        session.citations[marker]
+        for marker in dict.fromkeys(re.findall(r"\[(c\d+)\]", answer_text))
+        if marker not in own and marker in session.citations
+    ]
+    return [*citations, *earlier]
 
 
 def _openai_failure(

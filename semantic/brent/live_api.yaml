@@ -56,21 +56,15 @@ returned:
   - {field: appeal_decision_date, see: appeal_decision_date.yaml}
   - {field: url_planning_app, see: url_planning_app.yaml}
   - {field: legacy_record, see: legacy_record.yaml}
-  - {field: decision_not_issued, see: record_flags.yaml}
-  - {field: status_stale, see: record_flags.yaml}   # computed live: see live_rules
-  - {field: appeal_record_deleted, see: record_flags.yaml}
-  - {field: approximate_decision_date, see: record_flags.yaml}
-  - {field: outcome_source, see: record_flags.yaml}
+  - {field: decision_not_issued, see: decision_not_issued.yaml}
+  - {field: status_stale, see: status_stale.yaml}   # computed live: see live_rules
+  - {field: appeal_record_deleted, see: appeal_record_deleted.yaml}
+  - {field: approximate_decision_date, see: approximate_decision_date.yaml}
+  - {field: outcome_source, see: outcome_source.yaml}
   - {field: last_updated, see: sources.yaml}
 
-# In the database only: they need the ONS boundaries and PostGIS at load time.
-database_only:
-  - {field: location_check, see: location.yaml}
-  - {field: ward_2022, see: location.yaml}
-  - {field: centroid, see: location.yaml}
-  - {field: centroid_source, see: location.yaml}
-  - {field: placeholder_centroid, see: location.yaml}
-  - {field: site, see: location.yaml}
+# None: the bot is live-API only (the database was dropped, 2026-11-11).
+database_only: []
 
 live_rules:
   - id: status_stale_today
@@ -93,13 +87,12 @@ live_rules:
       Say so when the difference matters; record details do include the corrections.
   - id: no_ward_answers
     rule: >
-      Live records have no ward_2022, and the published ward must not be used (see
-      location.yaml). Do not answer "in ward X" questions; say the bot does not cover
-      wards yet.
+      The bot does not cover wards: the published ward mixes old and new ward names
+      and has not been checked, so it is not requested. Do not answer "in ward X"
+      questions; say the bot does not cover wards yet.
 
-# Default filters, from "Default filters for answers" in semantic/database_schema.md,
-# adapted to live data. Tools apply them to every query of that kind; code reads them
-# from here. Flag exclusions name the rule in cleaning.yaml (`derived`) that defines
+# Default filters for live answers. Tools apply them to every query of that kind;
+# code reads them from here. Flag exclusions name the rule in cleaning.yaml (`derived`) that defines
 # the flag, so its parameters (statuses, days, ids) live in one place only.
 default_filters:
   - id: decided
@@ -121,11 +114,17 @@ default_filters:
     rule: >
       Say which date is used. Legacy records have no valid_date, so counts by
       valid_date leave them out (valid_date.yaml).
-  - id: decision_times
-    applies_to: decision times, "on time"
+  - id: decision_duration
+    applies_to: how long a decision took
     rule: >
-      Only where both dates exist: valid_date and decision_target_date (recorded from
-      2018-01-24 on, decision_target_date.yaml).
+      From valid_date to decision_date; only where both exist (legacy records have
+      no valid_date).
+  - id: decided_on_time
+    applies_to: '"decided on time", "late"'
+    rule: >
+      Compare decision_date with decision_target_date; only where both exist, so from
+      2018 on (decision_target_date is recorded from 2018-01-24). Use the recorded
+      target date; never work it out from valid_date (decision_target_date.yaml).
 
 # How each excluded flag becomes a live query condition. The condition is the one in
 # cleaning.yaml's rule of the same id; status_stale is measured from today

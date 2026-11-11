@@ -6,6 +6,7 @@ are read from it, and only the derivations (address, legacy flag) are written he
 """
 
 import json
+import logging
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -18,6 +19,8 @@ import yaml
 
 from ..scope import Borough, borough_name, in_scope
 from . import postcodes
+
+logger = logging.getLogger(__name__)
 
 DATE_FIELDS = [
     "valid_date",
@@ -46,7 +49,6 @@ ADDRESS_PARTS = ["site_name", "site_number", "street_name", "locality", "postcod
 
 FULL_POSTCODE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b")
 NUMBER_ONLY = re.compile(r"\d+[A-Za-z]?(\s*-\s*\d+[A-Za-z]?)?")
-TEST_REFERENCE_PREFIX = "55/"
 
 
 @dataclass
@@ -176,16 +178,14 @@ def _ids(rules: Mapping[str, Any], rule_id: str) -> set[str]:
         rule_id: The rule's ``id``.
 
     Returns:
-        The ids the rule lists.
-
-    Raises:
-        KeyError: If no rule has that id.
+        The ids the rule lists; empty if the borough has no such rule (rules such as
+        ``early_1987_approximate`` exist only where the data needs them).
     """
     every = [*rules["all_records"], *(r for rs in rules["fields"].values() for r in rs)]
     for rule in every:
         if rule["id"] == rule_id:
             return set(rule.get("ids", []))
-    raise KeyError(rule_id)
+    return set()
 
 
 def _drop_reason(record: Mapping[str, Any], rules: Mapping[str, Any]) -> str | None:
@@ -195,12 +195,13 @@ def _drop_reason(record: Mapping[str, Any], rules: Mapping[str, Any]) -> str | N
         record: One record after ``tidy_text``.
         rules: The parsed cleaning rules.
 
+    A reference starting with the borough's test marker (``reference_prefix`` on
+    ``drop_test_records``: "55/" in Brent, "TEST" in Lewisham) but not on the list is
+    a new test record: dropped and logged as a WARNING, so someone looks at it. (The
+    database load used to stop here; live, a lookup must not fail.)
+
     Returns:
         The id of the drop rule that matched, or ``None``.
-
-    Raises:
-        ValueError: For a ``55/`` reference that is not on the test-record list,
-            so a new test record is looked at instead of loaded.
     """
     for rule in rules["all_records"]:
         if rule["action"] != "drop_records":
@@ -211,17 +212,39 @@ def _drop_reason(record: Mapping[str, Any], rules: Mapping[str, Any]) -> str | N
             record.get(k) is None for k in rule["when_all_null"]
         ):
             return rule["id"]
-    if (record.get("lpa_app_no") or "").startswith(TEST_REFERENCE_PREFIX):
-        raise ValueError(
-            f"unlisted 55/ reference {record['id']}: test record? see cleaning.yaml"
+    prefix = test_reference_prefix(rules)
+    if prefix and (record.get("lpa_app_no") or "").startswith(prefix):
+        logger.warning(
+            "unlisted test reference dropped",
+            extra={"id": record["id"], "prefix": prefix},
         )
+        return "drop_test_records"
     return None
+
+
+def test_reference_prefix(rules: Mapping[str, Any]) -> str | None:
+    """Return the borough's test-reference marker, from ``drop_test_records``.
+
+    Args:
+        rules: The parsed cleaning rules.
+
+    Returns:
+        The ``reference_prefix`` (e.g. "55/"), or ``None`` if the borough has none.
+    """
+    rule = next(
+        (r for r in rules["all_records"] if r["id"] == "drop_test_records"), None
+    )
+    return rule.get("reference_prefix") if rule else None
 
 
 def _apply_field_rules(
     row: dict[str, Any], rules: Mapping[str, Any], applied: Counter[str]
 ) -> None:
-    """Apply the ``fields`` rules (map, replace, fill_null) to one row in place.
+    """Apply the ``fields`` rules (map, replace, fill_null, copy_when_null) in place.
+
+    ``copy_when_null`` copies the ``from`` field into the field when the field is
+    empty and ``from`` is not (e.g. Lewisham's status_from_decision). ``to_text``
+    rules are documentation: ``number_as_text`` already does it.
 
     Args:
         row: The row being built; text values already tidied.
@@ -238,6 +261,8 @@ def _apply_field_rules(
                     row[name] = value.replace(rule["from"], rule["to"])
                 case "fill_null" if value is None:
                     row[name] = rule["to"]
+                case "copy_when_null" if value is None and row.get(rule["from"]):
+                    row[name] = row[rule["from"]]
                 case _:
                     continue
             applied[rule["id"]] += 1
@@ -319,7 +344,11 @@ def _decision_not_issued(row: Mapping[str, Any], rules: Mapping[str, Any]) -> bo
         ``True`` when the status is still pending, a decision is set and there is
         no decision date.
     """
-    rule = next(r for r in rules["derived"] if r["id"] == "decision_not_issued")
+    rule = next(
+        (r for r in rules.get("derived", []) if r["id"] == "decision_not_issued"), None
+    )
+    if rule is None:  # only where the data needs it (Brent)
+        return False
     return (
         row["status"] in rule["when_status"]
         and row["decision"] is not None
@@ -327,8 +356,27 @@ def _decision_not_issued(row: Mapping[str, Any], rules: Mapping[str, Any]) -> bo
     )
 
 
+def _legacy_record(bo_system: str | None, rules: Mapping[str, Any]) -> bool:
+    """Apply the derived rule ``legacy_record`` (its ``when_equals``) to one record.
+
+    Args:
+        bo_system: The record's tidied ``bo_system``.
+        rules: The parsed cleaning rules.
+
+    Returns:
+        ``True`` when ``bo_system`` equals the rule's value; ``False`` if it doesn't,
+        or the borough has no such rule.
+    """
+    rule = next(
+        (r for r in rules.get("derived", []) if r["id"] == "legacy_record"), None
+    )
+    if rule is None:
+        return False
+    return bo_system == rule["when_equals"]["bo_system"]
+
+
 def _geojson(value: Any) -> str | None:  # noqa: ANN401
-    """Serialise a GeoJSON geometry for PostGIS, skipping empty ones.
+    """Serialise a GeoJSON geometry as text, skipping empty ones.
 
     Args:
         value: The ``wgs84_polygon`` object from the record.
@@ -371,6 +419,9 @@ def clean_record(
     # borough is missing only when lpa_name gave the scope; store the scope borough.
     row["borough"] = record.get("borough") or borough_name(borough)
     row |= {name: record.get(name) for name in TEXT_FIELDS}
+    # The address parts go through the field rules too (e.g. locality "NULL" -> null)
+    # before the address is built from them.
+    row |= {name: record.get(name) for name in ADDRESS_PARTS}
     row["site_number"] = number_as_text(record.get("site_number"))
     for name in DATE_FIELDS:
         row[name] = parse_date(record.get(name))
@@ -387,10 +438,9 @@ def clean_record(
     if row["approximate_decision_date"]:
         result.applied["early_1987_approximate"] += 1
 
-    parts = {name: record.get(name) for name in ADDRESS_PARTS}
-    parts["site_number"] = row.pop("site_number")
+    parts = {name: row.pop(name) for name in ADDRESS_PARTS}
     row["address"], row["address_kind"] = build_address(parts)
-    row["legacy_record"] = row.pop("bo_system") == "FME Legacy Data Import"
+    row["legacy_record"] = _legacy_record(row.pop("bo_system"), rules)
 
     centroid = raw.get("centroid") or {}
     lat, lon = centroid.get("lat"), centroid.get("lon")

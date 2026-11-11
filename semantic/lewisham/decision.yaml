@@ -1,0 +1,122 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: decision
+web_label: Decision
+meaning: >
+  The decision by the local planning authority named in lpa_name. Not changed by an
+  appeal: the appeal outcome is in appeal_decision, and the current stage is in status
+  (e.g. decision Refused + status Allowed = refused, then won on appeal).
+schema_definition: Describes the decision given, see Field Values tab for all Decision Types
+format: text
+
+# Values after cleaning (live API, 2026-11-11), most common first.
+values:
+  - Approved
+  - Refused
+  - Withdrawn
+  - Not Required
+  - No Objection to Proposal (OBS only)
+  - Closed
+  - Comment Issued
+  - Objection Raised to Proposal (OBS only)
+values_not_in_schema: []   # "Not required" (1) becomes Not Required at load
+
+schema_values_never_seen:
+  - Called in by Secretary of State
+  - Declined to Determine
+  - Opinion Issued
+  - Pre-application Advice Case Completed
+  - Referred to Mayor
+  - Split Decision
+
+checks_passed:
+  - Every filled value is a string; no hidden whitespace.
+  - No pending application (Application Under Consideration) has a decision.
+
+known_issues:
+  - id: empty_decision
+    count: 529
+    description: >
+      529 have no decision. By status: 488 not decided yet (Application Under
+      Consideration 481, Application Invalid 7), where no decision is normal; 3 with
+      status Unknown (no outcome on the portal either; status.yaml, unknown_status);
+      38 decided but the decision is not recorded (see legacy_decision_missing).
+
+  - id: legacy_decision_missing
+    count: 38
+    description: >
+      Status Superseded (23) or Lapsed (15), a decision_date (1987-2018), but no
+      decision. All are legacy imports (bo_system FME Legacy Data Import) with no
+      valid_date and no portal URL, so no other source was checked. Status does not
+      settle the decision: Lapsed also follows refusals (15 Lapsed records are
+      Refused), and Superseded does not say whether it was approved.
+
+  - id: split_decision_only_in_status
+    count: 11
+    description: >
+      Split Decision is never a council decision in Lewisham. The 11 status Split
+      Decision all have decision Refused and appeal_decision Split Decision: an appeal
+      outcome, as in Brent.
+
+  - id: withdrawn_appeal_in_status
+    count: 16
+    description: >
+      Status Withdrawn with decision Refused (13) or Approved (3): every one has
+      appeal_decision Withdrawn, so the appeal was withdrawn, not the application. The
+      council's decision stands.
+
+  - id: appeal_after_approval
+    count: 5
+    description: >
+      Status Dismissed (3) or Allowed (2) with decision Approved. Why there was an
+      appeal (e.g. against conditions) is not checked.
+
+  - id: outcome_from_portal
+    count: 2
+    description: >
+      Lewisham-DC_21_120320 and Lewisham-DC_22_129646 had a decision_date but no status
+      or decision in the Datahub. Lewisham's portal shows "Granted Deemed Consent"
+      (checked by a person 2026-11-11), loaded as Approved. Hint, not confirmed: deemed
+      consent usually means the prior approval was granted by default because the
+      council did not decide in time.
+
+  - id: pre_cases
+    count: 37
+    description: >
+      37 records have an lpa_app_no starting PRE/. Their decisions are Comment Issued,
+      Objection Raised / No Objection to Proposal (OBS only), Closed or Withdrawn, never
+      Approved or Refused. Their portal pages are restricted (4 of 4 checked,
+      2026-11-11). What kind of case they are is not confirmed.
+    hint: >
+      Not confirmed. Descriptions such as "Concept meeting" and "Pre-planning
+      application (concept)" suggest pre-application advice.
+
+  - id: opinion_values
+    description: >
+      Comment Issued, Closed, No Objection / Objection Raised to Proposal (OBS only) are
+      mostly on DC/ records (381 of 416), not only PRE/. They are used both for
+      Lewisham's own opinions (e.g. EIA screening, construction hours) and for its
+      responses when another authority consults it (sources.yaml,
+      consultation_responses). "OBS" very likely means observations; not confirmed.
+
+rules:
+  - '"Approved / refused by the council?" uses decision, not status.'
+  - '"How many were withdrawn?" counts decision Withdrawn (the applicant stopping);
+    status Withdrawn can be a withdrawn appeal. Withdrawn appeals come from
+    appeal_decision.'
+  - No decision is normal for applications not decided yet (Application Under
+    Consideration, Application Invalid).
+  - No decision means "not recorded"; never guess it from status.
+  - 'For the 38 legacy records with no decision (legacy_decision_missing): give the
+    status and decision_date the Datahub has, and say no decision is recorded and no
+    other source is available for it.'
+  - When status and decision disagree (e.g. status Closed or Completed after a
+    decision), report decision as the council's outcome and status as the current
+    stage.
+  - For the 2 decisions from the portal (outcome_from_portal), cite the portal check
+    (sources.yaml) and say the portal wording is "Granted Deemed Consent".
+  - Never describe Comment Issued, OBS-only or PRE/ outcomes as a permission or a
+    refusal; give the value as recorded.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/decision.ipynb, Steps 1-11); knowledge/lewisham_portal_checks.md

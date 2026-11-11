@@ -1,0 +1,34 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: outcome_source
+web_label: null   # derived; not on the website (set by outcome_from_portal in cleaning.yaml)
+meaning: >
+  Where a record's outcome (status and decision) comes from: the Datahub, or a check a
+  person made on Lewisham's planning portal because the Datahub had no outcome.
+format: text
+
+values:
+  - datahub               # every record except the 2 below
+  - portal_manual_check   # Lewisham-DC_21_120320, Lewisham-DC_22_129646
+
+checks_passed:
+  - portal_manual_check is set only by outcome_from_portal, and only while the Datahub
+    still has no status and no decision for the record (2 records, 2026-11-11).
+
+known_issues:
+  - id: granted_deemed_consent
+    count: 2
+    description: >
+      Both portal outcomes read "Granted Deemed Consent" (not a schema value), loaded as
+      status and decision Approved (sources.yaml, outcome_from_portal group).
+
+rules:
+  - Count these like any other outcome.
+  - When the outcome of a record with outcome_source = portal_manual_check is given,
+    cite the portal check (sources.yaml, lewisham_portal_manual_check) and say the
+    Datahub records no outcome for it.
+  - A status taken from decision (cleaning.yaml, status_from_decision) is from the
+    Datahub, so outcome_source stays datahub.
+
+checked:
+  date: 2026-11-11
+  source: cleaning.yaml (outcome_from_portal); knowledge/lewisham_portal_checks.md

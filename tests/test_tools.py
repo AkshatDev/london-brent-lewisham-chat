@@ -19,11 +19,14 @@ from london_brent_lewisham_chat.scope import scope_filter
 from london_brent_lewisham_chat.semantic import SemanticLayer, load_semantic
 from london_brent_lewisham_chat.tools import (
     DESCRIPTION_MAX_CHARS,
+    Area,
     DetailsArgs,
     _excluded_records,
     count_applications,
     count_args_model,
     count_filters,
+    count_in,
+    details_in,
     get_application_details,
 )
 
@@ -304,7 +307,12 @@ def test_details_searches_the_reference_with_scope_exclusions_and_fields(
     body = json.loads(request.content)
     assert body["query"]["bool"]["filter"] == [
         scope_filter("brent"),
-        {"match_phrase": {"lpa_app_no": "24/3634"}},
+        {
+            "bool": {
+                "should": [{"match_phrase": {"lpa_app_no": "24/3634"}}],
+                "minimum_should_match": 1,
+            }
+        },
         _excluded_records(brent),
     ]
     assert body["_source"] == brent.live.request_fields
@@ -364,8 +372,8 @@ def test_a_deleted_appeal_is_cleaned_noted_and_cites_the_portal_check(
     assert application["status"] == "Refused"  # ZZZ cleaned, as in cleaning.yaml
     assert application["appeal_decision"] is None
     assert application["appeal_record_deleted"] is True
-    rule = brent.flags.flags["appeal_record_deleted"].bot_rule
-    assert out.result["notes"] == [" ".join(rule.split())]
+    rules = brent.field_doc("appeal_record_deleted").rules
+    assert out.result["notes"] == [" ".join(rule.split()) for rule in rules]
     assert out.citations[0].text.endswith(
         "the Planning London Datahub shows status ZZZ, decision Refused, "
         "appeal decision ZZZ."
@@ -428,3 +436,99 @@ def test_an_out_of_scope_record_never_reaches_the_model(
         r.levelname == "WARNING" and r.getMessage() == "out-of-scope record dropped"
         for r in caplog.records
     )
+
+
+# --- Two boroughs ---------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def lewisham_layer() -> SemanticLayer:
+    return load_semantic("lewisham", SEMANTIC)
+
+
+def test_count_choices_cover_both_boroughs(
+    brent: SemanticLayer, lewisham_layer: SemanticLayer
+) -> None:
+    model = count_args_model([brent, lewisham_layer])
+    schema = model.model_json_schema()["properties"]
+    assert set(schema["local_authority"]["enum"]) == {"Brent", "Lewisham"}
+    [choices] = [a["enum"] for a in schema["decision"]["anyOf"] if "enum" in a]
+    assert "Not Required" in choices  # Lewisham's own value, from its decision.yaml
+
+
+def test_a_decision_a_borough_does_not_use_goes_back_as_an_error(
+    brent: SemanticLayer, lewisham_layer: SemanticLayer
+) -> None:
+    model = count_args_model([brent, lewisham_layer])
+    datahub, requests = fake_datahub(httpx.Response(200, json={"count": 1}))
+    areas = {"brent": Area(brent, datahub), "lewisham": Area(lewisham_layer, datahub)}
+
+    out = asyncio.run(
+        count_in(
+            model(local_authority="Brent", year=2024, decision="Not Required"),
+            areas=areas,
+            citation_id="c1",
+        )
+    )
+
+    assert out.result == {"error": "'Not Required' is not a decision Brent uses"}
+    assert requests == []  # never sent to the Datahub
+
+
+def test_an_excluded_lewisham_record_is_explained_not_just_missing(
+    lewisham_layer: SemanticLayer,
+) -> None:
+    datahub, _ = fake_datahub(searched())  # dropped records never come back
+    areas = {"lewisham": Area(lewisham_layer, datahub)}
+
+    out = asyncio.run(
+        details_in(DetailsArgs(reference="DC/26/142577"), areas=areas, citation_id="c1")
+    )
+
+    assert out.result["found"] is False
+    assert out.result["excluded"] is True
+    assert "removed or restricted from public viewing" in out.result["reason"]
+    assert out.citations == []
+
+
+@pytest.mark.parametrize(
+    ("asked", "forms"),
+    [
+        ("DC/21/120061", ["DC/21/120061", "21/120061"]),
+        ("21/120061", ["21/120061", "DC/21/120061"]),
+    ],
+)
+def test_lewisham_lookups_try_the_reference_with_and_without_dc(
+    lewisham_layer: SemanticLayer, asked: str, forms: list[str]
+) -> None:
+    client, requests = fake_datahub(searched())
+    asyncio.run(
+        get_application_details(
+            DetailsArgs(reference=asked),
+            semantic=lewisham_layer,
+            datahub=client,
+            citation_id="c1",
+        )
+    )
+    should = json.loads(requests[0].content)["query"]["bool"]["filter"][1]["bool"][
+        "should"
+    ]
+    assert [clause["match_phrase"]["lpa_app_no"] for clause in should] == forms
+
+
+def test_details_searches_every_borough_when_none_is_named(
+    brent: SemanticLayer, lewisham_layer: SemanticLayer
+) -> None:
+    brent_hub, brent_requests = fake_datahub(searched(raw()))
+    lewisham_hub, lewisham_requests = fake_datahub(searched())
+    areas = {
+        "brent": Area(brent, brent_hub),
+        "lewisham": Area(lewisham_layer, lewisham_hub),
+    }
+
+    out = asyncio.run(
+        details_in(DetailsArgs(reference="24/3634"), areas=areas, citation_id="c1")
+    )
+
+    assert out.result["found"] is True
+    assert (len(brent_requests), len(lewisham_requests)) == (1, 1)

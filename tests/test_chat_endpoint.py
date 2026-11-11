@@ -20,6 +20,7 @@ from london_brent_lewisham_chat.routers.chat import (
     UNAVAILABLE,
 )
 from london_brent_lewisham_chat.scope import scope_filter
+from london_brent_lewisham_chat.tools import Area
 from tests.test_chat import FakeDatahub, FakeOpenAI, call
 
 Q1 = "How many planning applications were validated in Brent in 2024?"
@@ -40,7 +41,9 @@ def post(
     app = create_app(Settings())
     with TestClient(app) as client:
         app.state.openai = openai_client
-        app.state.datahub = datahub
+        app.state.areas = (
+            {"brent": Area(app.state.layers["brent"], datahub)} if datahub else None
+        )
         responses = [
             client.post("/chat", json={"question": q, "session_id": s})
             for q, s in questions
@@ -236,7 +239,9 @@ def test_a_failed_question_leaves_no_history_behind(
     app = create_app(Settings())
     with TestClient(app) as client:
         app.state.openai = FakeOpenAI([[call(2024)]]).client
-        app.state.datahub = FakeDatahub(status=502).client
+        app.state.areas = {
+            "brent": Area(app.state.layers["brent"], FakeDatahub(status=502).client)
+        }
         failed = client.post("/chat", json={"question": Q1, "session_id": "demo-1"})
 
         fake = FakeOpenAI(["Fine."])
@@ -295,3 +300,28 @@ def test_reasoning_is_logged_as_a_count_never_as_text(
     [finished] = [line for line in lines if line["message"] == "chat finished"]
     assert finished["reasoning_tokens"] == 146
     assert summary not in out  # the summary goes to the Logfire trace only
+
+
+def test_a_follow_up_shows_the_earlier_citations_its_answer_mentions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake = FakeOpenAI(
+        [
+            [call(2024)],
+            "3,140 were validated [c1].",
+            [call(2024, decision="Refused")],
+            "722 of those [c2], out of 3,140 [c1]; see also [c9].",
+        ]
+    )
+
+    first, second = post(
+        capsys,
+        (Q1, "demo-1"),
+        (Q2, "demo-1"),
+        openai_client=fake.client,
+        datahub=FakeDatahub(722).client,
+    )[0]
+
+    assert [c["id"] for c in first.json()["citations"]] == ["c1"]
+    # This turn's c2 first, then the earlier c1 its answer repeats; c9 doesn't exist.
+    assert [c["id"] for c in second.json()["citations"]] == ["c2", "c1"]

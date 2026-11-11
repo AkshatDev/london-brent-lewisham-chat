@@ -1,0 +1,34 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: lpa_name
+web_label: null   # not one of the website's 16 columns
+meaning: >
+  The local planning authority the record belongs to. In Lewisham it is always Lewisham
+  Council; there is no second authority (unlike Brent, where OPDC decides some sites).
+schema_definition: Contains the Local Planning Authority name, see Field Values tab for all available LPAs
+format: text
+
+values:
+  - Lewisham
+
+checks_passed:
+  - Every record has a value, exactly "Lewisham"; no case or spacing variants.
+  - All 29,021 records with lpa_name Lewisham in the Datahub are in scope (none is
+    filed under another borough).
+
+known_issues:
+  - id: consultation_responses
+    description: >
+      For a consultation response, lpa_name is Lewisham but Lewisham only commented;
+      the other authority decided the application. Confirmed ones are dropped
+      (cleaning.yaml, drop_consultation_responses); others may remain (sources.yaml,
+      consultation_responses).
+
+rules:
+  - '"Who decided it?" is Lewisham Council, except for a record that is a consultation
+    response (sources.yaml, consultation_responses): there Lewisham only commented.'
+  - lpa_name can't split Lewisham's applications (there is one authority); the scope
+    filter on borough and lpa_name always stays.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/borough.ipynb, Steps 1-3)

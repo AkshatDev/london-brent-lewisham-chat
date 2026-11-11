@@ -1,0 +1,60 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: decision_date
+web_label: Decision date
+meaning: >
+  Date of the decision by the local planning authority named in lpa_name. Not the
+  appeal: see appeal_decision_date.
+schema_definition: Contains the decision date for the application (DD/MM/YYYY)
+format: date   # the Datahub sends DD/MM/YYYY text; cleaning reads it as a date
+
+checks_passed:
+  - All filled values are valid DD/MM/YYYY dates (no blanks, no other characters),
+    from 12/01/1987 to 14/11/2026.
+  - No placeholder dates (the most common date is used 45 times; 3.0% fall on the 1st
+    of a month, about what chance gives).
+  - No pending application (Application Under Consideration) has a decision_date.
+
+known_issues:
+  - id: thin_before_2019
+    description: >
+      1987-1999 have 22-43 decisions a year and 2000-2018 have 103-297; from 2019 on,
+      1,898-3,640 a year (after cleaning). Before 2019 there are 4,298 decisions in all, about as many as
+      the 4,312 legacy records. Counts for years before 2019 are far from complete.
+
+  - id: empty_breakdown
+    count: 495
+    description: >
+      After cleaning, 495 have no decision_date: pending (Application Under
+      Consideration) 481, Application Invalid 7, Withdrawn with no date 5 (status
+      copied from decision), Lewisham-DC_24_138293 (Unknown, the portal has no outcome
+      either) and decision_without_date.
+
+  - id: decision_without_date
+    count: 1
+    description: >
+      Lewisham-DC_21_124764: a Prior Approval valid 14/12/2021, decision Approved,
+      status Completed, no decision_date.
+
+  - id: future_decision_date
+    count: 1
+    description: >
+      Lewisham-DC_26_145383: Approved with decision_date 14/11/2026, after the day it
+      was checked (2026-11-11). Not explained.
+
+  - id: decision_before_valid
+    count: 14
+    description: See valid_date.yaml (known issue valid_after_decision).
+
+rules:
+  - '"When was it decided?" uses decision_date; appeals use appeal_decision_date.'
+  - 'Counts by year of decision_date before 2019: give the count, and say that
+    Lewisham''s records before 2019 are far from complete (mostly legacy imports).'
+  - Decision times (valid_date to decision_date) only where both dates exist and
+    decision_date is on or after valid_date.
+  - No decision_date is normal for applications not decided yet (Application Under
+    Consideration, Application Invalid) and for withdrawals.
+  - A decision_date after today is as recorded; say it is in the future.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/decision_date.ipynb, Steps 1-4)

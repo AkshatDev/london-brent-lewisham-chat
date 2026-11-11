@@ -31,7 +31,7 @@ known_issues:
       Open applications (Application Received / Under Consideration, no
       decision_date) more than a year past their target date are flagged
       status_stale = true: the Datahub stopped updating them, and those checked on
-      Brent's portal had moved on (record_flags.yaml; open question 5).
+      Brent's portal had moved on (status_stale.yaml; open question 5).
 
 rules:
   - '"Was it decided on time?" compares decision_date with decision_target_date; only

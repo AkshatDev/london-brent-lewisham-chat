@@ -2,8 +2,8 @@
 field: borough
 web_label: Borough
 meaning: >
-  The borough the site is in. The scope field: every record in this database is in
-  Brent, whichever authority decided it (lpa_name).
+  The borough the site is in. The scope field: every record the bot reads is in Brent,
+  whichever authority decided it (lpa_name).
 schema_definition: Describes the name of the Borough
 format: text
 
@@ -31,8 +31,11 @@ rules:
   - '"Which borough?" is always Brent here; borough is not a way to split Brent up
     (use address for places within Brent).'
   - Who decided is lpa_name, not borough (e.g. OPDC decides some sites in Brent).
-  - Every record has been checked by location against the official ONS Brent
-    boundary (location_check in location.yaml).
+  - >-
+    Every record is in Brent by scope: each live query is limited to borough Brent
+    (or, with no borough, lpa_name Brent), and each record is checked again when it
+    arrives. The 2026-11-10 snapshot was also checked by location against the ONS
+    Brent boundary; records added since then were not.
 
 checked:
   date: 2026-11-10

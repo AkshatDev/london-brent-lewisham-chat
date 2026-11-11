@@ -1,0 +1,27 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the live data after cleaning.yaml.
+# A derived column: set on each live record by cleaning (decision_not_issued in
+# cleaning.yaml). Moved here from record_flags.yaml.
+field: decision_not_issued
+web_label: null   # derived; not on the website
+meaning: >
+  True when a decision is recorded but the application is still pending: status
+  Application Received or Under Consideration, a decision, and no decision date. The
+  decision is kept as the Datahub gives it.
+format: boolean
+
+checks_passed:
+  - 2 records on the 2026-11-10 snapshot (Brent-25_3290, Brent-26_1174); Brent's
+    planning portal shows both as "Awaiting decision", with a Section 106 agreement not
+    yet signed.
+
+rules:
+  - Treat as not decided yet; leave out of approval / refusal counts (the decided
+    default filter in live_api.yaml does this for counts).
+  - Say the Datahub records the decision early, likely subject to a legal agreement.
+  - When the answer depends on this, say so.
+
+checked:
+  date: 2026-11-11
+  source: >
+    record_flags.yaml (2026-11-10, cleaned database snapshot); cleaning.yaml rule
+    decision_not_issued; Brent's planning portal (sources.yaml)

@@ -1,0 +1,48 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: description
+web_label: Description
+meaning: >
+  Free-text description of the proposed development. The main source for "what was
+  applied for" questions (works, sizes, uses).
+schema_definition: Provides a general description of proposed development
+format: text
+
+checks_passed:
+  - Every filled value is a string; no blank or whitespace-only values.
+  - Mostly unique text (median 199 characters); apart from the placeholder below, no
+    description is used more than 5 times.
+
+known_issues:
+  - id: ldms_placeholder
+    count: 195
+    description: >
+      "No description provided by LDMS" is a placeholder, not a description. All 195
+      are legacy imports (bo_system FME Legacy Data Import) decided 1987-1993, 193 of
+      them Approved. Brent has the same placeholder.
+
+  - id: no_description
+    count: 21
+    description: >
+      21 kept records have no description (the empty records, which also have none,
+      are dropped). Mostly opinion-type decisions (Comment Issued, No Objection /
+      Objection Raised to Proposal (OBS only), Closed), 7 of them PRE/ records; also
+      2 Withdrawn, 1 Refused, 1 Approved, 1 pending. Several have a site_name in
+      another borough and may be consultation responses (sources.yaml,
+      consultation_responses).
+
+  - id: one_letter_description
+    count: 1
+    description: >
+      Lewisham-DC_22_129197 (Approved 20/01/2023, 31 Hatcham Park Road SE14): the whole
+      description is "V".
+
+rules:
+  - Search descriptions by meaning or full text, never by exact match.
+  - Treat "No description provided by LDMS" and Lewisham-DC_22_129197's "V" as no
+    description; say no description is recorded, never quote them as the proposal.
+  - Some descriptions name another borough or an adjoining authority's reference; that
+    alone does not make the site out of Lewisham (sources.yaml, consultation_responses).
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/description.ipynb, Steps 1-3)

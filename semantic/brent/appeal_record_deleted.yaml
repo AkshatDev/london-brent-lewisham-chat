@@ -1,0 +1,26 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the live data after cleaning.yaml.
+# A derived column: set on each live record by cleaning (deleted_appeal in
+# cleaning.yaml). Moved here from record_flags.yaml.
+field: appeal_record_deleted
+web_label: null   # derived; not on the website
+meaning: >
+  True when an appeal was entered and later deleted. The Datahub sends status and
+  appeal_decision ZZZ for these; Brent's planning portal shows the appeal record as
+  "Technically Deleted Record". Cleaning sets status Refused (the council's refusal
+  stands) and leaves appeal_decision and appeal_decision_date empty.
+format: boolean
+
+checks_passed:
+  - 16 records on the 2026-11-10 snapshot.
+
+rules:
+  - Not an appeal; never count it in appeal figures. Appeal counts on appeal_decision
+    leave these out by themselves, since their appeal_decision is empty.
+  - If asked, say an appeal was entered and later deleted.
+  - When the answer depends on this, say so.
+
+checked:
+  date: 2026-11-11
+  source: >
+    record_flags.yaml (2026-11-10, cleaned database snapshot); cleaning.yaml rule
+    deleted_appeal; Brent's planning portal (sources.yaml)

@@ -1,0 +1,150 @@
+# Live-API facts for the chat bot, Lewisham only (golden rule).
+# What the bot requests from the live Datahub, which cleaned fields reach the model
+# (each explained by its own YAML), and the rules for live answers. Same structure as
+# Brent's; built from the Lewisham EDA handover (items 8-12).
+field: live_api
+meaning: >
+  Every live record is fetched with the scope filter, re-checked in scope, and cleaned
+  per record with clean_record and cleaning.yaml. Only fields listed under returned
+  reach the model; anything else the Datahub sends is dropped before the model sees it.
+
+# Raw fields asked for with Elasticsearch _source: exactly what clean_record needs as
+# input. Same list as Brent's.
+request_fields:
+  - id
+  - borough            # scope check
+  - lpa_name           # scope check
+  - lpa_app_no
+  - status
+  - decision
+  - application_type
+  - description
+  - appeal_decision
+  - url_planning_app
+  - bo_system          # -> legacy_record
+  # ward is a clean_record input too, but not requested: wards are not covered
+  # (no_ward_answers), and a missing field simply arrives as None.
+  - valid_date
+  - decision_date
+  - decision_target_date
+  - appeal_decision_date
+  - site_name          # -> address (with the next four)
+  - site_number
+  - street_name
+  - locality
+  - postcode
+  - last_updated
+
+# Fields returned to the model after cleaning; `see` names the file that explains each.
+# Lewisham has only the derived columns its data needs: no appeal_record_deleted (no
+# ZZZ), decision_not_issued (no pending record has a decision), approximate_decision_date
+# (no month-only dates) or status_stale (no condition yet; see pending_may_be_stale).
+returned:
+  - {field: lpa_app_no, see: lpa_app_no.yaml}
+  - {field: id, see: sources.yaml}   # for citations only
+  - {field: lpa_name, see: lpa_name.yaml}
+  - {field: borough, see: borough.yaml}
+  - {field: application_type, see: application_type.yaml}
+  - {field: description, see: description.yaml}
+  - {field: address, see: address.yaml}
+  - {field: address_kind, see: address.yaml}
+  - {field: status, see: status.yaml}
+  - {field: decision, see: decision.yaml}
+  - {field: valid_date, see: valid_date.yaml}
+  - {field: decision_date, see: decision_date.yaml}
+  - {field: decision_target_date, see: decision_target_date.yaml}
+  - {field: appeal_decision, see: appeal_decision.yaml}
+  - {field: appeal_decision_date, see: appeal_decision_date.yaml}
+  - {field: url_planning_app, see: url_planning_app.yaml}
+  - {field: legacy_record, see: legacy_record.yaml}
+  - {field: outcome_source, see: outcome_source.yaml}
+  - {field: last_updated, see: sources.yaml}
+
+# None: the bot is live-API only.
+database_only: []
+
+# Some references are published with "DC/" and some without, for the same application
+# (lpa_app_no.yaml): lookups try both forms.
+reference_prefix_optional: "DC/"
+
+live_rules:
+  - id: counts_exclude_dropped
+    rule: >
+      Counts come from the Datahub's _count. Records the cleaning drops are excluded in
+      the query: the ids of drop_test_records, drop_portal_removed,
+      drop_consultation_responses and drop_stale_duplicates, and the drop_empty_records
+      condition (status, decision, decision_date and description all empty). Without
+      drop_stale_duplicates, 70 decided applications would also count as pending.
+  - id: counts_use_published_values
+    rule: >
+      Counts filter on the values the Datahub publishes. Corrections applied per record
+      (status_from_decision, outcome_from_portal, case fixes) are not in them, so a
+      count by decision or status can differ slightly from the cleaned records. Say so
+      when the difference matters; record details do include the corrections.
+  - id: pending_may_be_stale
+    rule: >
+      Lewisham has no rule yet for out-of-date pending records: most pending
+      applications have no target date to measure from. A count of applications still
+      under consideration may include some that were decided long ago but not
+      updated; say so when giving one.
+  - id: no_ward_answers
+    rule: >
+      The bot does not cover wards: the published ward has not been checked, so it is
+      not requested. Do not answer "in ward X" questions; say the bot does not cover
+      wards yet.
+
+# Default filters for answers, applied by the tools. No flags to exclude: Lewisham's
+# data has no decisions recorded before they are issued, and no stale-status rule yet.
+# No decided_on_time: the target date is recorded for only about a fifth of
+# applications from 2019 on, leaning towards approvals (decision_target_date.yaml).
+default_filters:
+  - id: decided
+    applies_to: counts and lists by council decision (approved, refused, ...)
+    filter_on: decision          # never status (decision.yaml)
+  - id: pending
+    applies_to: '"pending", "under consideration", "awaiting a decision"'
+    filter_on: status
+    status_in: [Application Under Consideration]
+  - id: appeals
+    applies_to: appeal outcomes
+    filter_on: appeal_decision
+  - id: year
+    applies_to: '"in <year>"'
+    date_field: {decisions: decision_date, submissions: valid_date}
+    rule: >
+      Say which date is used. valid_date is recorded from 2019 on only, so counts by
+      valid_date cover 2019 on; Lewisham's records before 2019 are far from complete
+      (mostly legacy imports), so say so for earlier years (valid_date.yaml,
+      decision_date.yaml).
+  - id: decision_duration
+    applies_to: how long a decision took
+    rule: >
+      From valid_date to decision_date; only where both exist and decision_date is on
+      or after valid_date (decision_date.yaml).
+
+# No flag conditions: Lewisham's default filters exclude no flags.
+flag_conditions: {}
+
+# The one line the prompt carries about everything not listed above.
+uncovered: >
+  The Planning London Datahub publishes more about each application than this assistant
+  covers yet (for example homes and residential units, floorspace, site constraints,
+  buildings, phasing and wards). Whether an application was decided on time is not
+  covered for Lewisham. If a question needs those, say it is not covered yet rather
+  than guess.
+
+citation:
+  live_query:
+    cite_as: 'Planning London Datahub API (live): <what was counted or searched>, retrieved <retrieved_at>.'
+  live_record:
+    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), retrieved <retrieved_at>.'
+  other_sources: >
+    From sources.yaml: lewisham_portal_manual_check (its groups: outcome_from_portal,
+    portal_same_gap, portal_removed, migrated_record) and lewisham_portal_link
+    (url_planning_app).
+
+checked:
+  date: 2026-11-11
+  source: >
+    the Lewisham EDA handover (items 8-12); semantic/lewisham field files and
+    cleaning.yaml; the same live index mapping as Brent's.

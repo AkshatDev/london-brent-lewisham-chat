@@ -44,8 +44,10 @@ known_issues:
       Brent-20_4264: appeal_decision Allowed comes from Brent's portal ("Appeal
       decided, Appeal Allowed", checked by a person 2026-11-10); the Datahub had no
       appeal data and still said Application Received. No council decision and no
-      appeal date are known (likely an appeal against non-determination).
-      outcome_source = portal_manual_check.
+      appeal date are known. outcome_source = portal_manual_check.
+    hint: >
+      Not confirmed. An appeal with no council decision may be an appeal against
+      non-determination (the council did not decide in time).
 
   - id: withdrawn_appeal
     count: 43

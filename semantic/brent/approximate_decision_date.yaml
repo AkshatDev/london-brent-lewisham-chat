@@ -1,0 +1,22 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the live data after cleaning.yaml.
+# A derived column: set on each live record by cleaning (early_1987_approximate in
+# cleaning.yaml, by id). Moved here from record_flags.yaml.
+field: approximate_decision_date
+web_label: null   # derived; not on the website
+meaning: >
+  True when the decision_date is known to the month only: legacy records from early
+  1987 whose decision dates were recorded as a month (24 of 25 on the 1st).
+format: boolean
+
+checks_passed:
+  - 25 records on the 2026-11-10 snapshot, listed by id in cleaning.yaml.
+
+rules:
+  - Give the month only ("about March 1987"), never the day.
+  - When the answer depends on this, say so.
+
+checked:
+  date: 2026-11-11
+  source: >
+    record_flags.yaml (2026-11-10, cleaned database snapshot); cleaning.yaml rule
+    early_1987_approximate

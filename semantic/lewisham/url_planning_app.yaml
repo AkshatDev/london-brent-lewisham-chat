@@ -1,0 +1,45 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: url_planning_app
+web_label: Planning application URL
+meaning: >
+  Link to the application's page on Lewisham's planning portal, where the documents,
+  plans and full decision notice are.
+schema_definition: Contains the website address to the published planning application
+format: >
+  https://planning.lewisham.gov.uk/online-applications/applicationDetails.do?keyVal=<key>&activeTab=summary
+
+checks_passed:
+  - All URLs have exactly the format above (one host, one path, keys _LEWIS_DCAPR_<n>);
+    no spaces or other hosts.
+  - Every URL is unique after cleaning (23,387 records with a URL); before cleaning, 79
+    pages were shared by two records (cleaning.yaml, drop_stale_duplicates).
+  - Legacy records (bo_system FME Legacy Data Import, 4,312) never have a URL.
+
+known_issues:
+  - id: missing_url
+    count: 66
+    description: >
+      66 records that are not legacy records have no URL (36 CSV Data Import, 30 of the
+      33 Portal records). 49 of them also have no valid_date or target date
+      (valid_date.yaml, missing_valid_date); the other 17 are mostly older, built
+      applications (decided 2012-2022).
+
+  - id: restricted_pages
+    description: >
+      Some portal pages are "removed or restricted from public viewing": 6 records whose
+      page is removed are dropped (cleaning.yaml, drop_portal_removed); PRE/ pages were
+      restricted in all 4 checked (decision.yaml, pre_cases), and those records are kept.
+
+rules:
+  - Give this link when someone wants the documents, plans or decision notice.
+  - No URL on a legacy record is expected; say the link is not recorded for this record.
+  - The 66 non-legacy records without a URL are real gaps, not legacy records; say no
+    link is recorded.
+  - A PRE/ record's link may open a "not available" page; say the page may be
+    restricted.
+  - The service never reads the portal (links are for people); facts come from the live
+    Datahub API and, where cited, from portal checks made by a person (sources.yaml).
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/url_planning_app.ipynb, Steps 1-5)

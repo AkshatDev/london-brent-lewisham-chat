@@ -21,8 +21,7 @@ from .scope import Borough
 CLEANING = "cleaning.yaml"
 LIVE_API = "live_api.yaml"
 SOURCES = "sources.yaml"
-RECORD_FLAGS = "record_flags.yaml"
-SPECIAL_FILES = {CLEANING, LIVE_API, SOURCES, RECORD_FLAGS}
+SPECIAL_FILES = {CLEANING, LIVE_API, SOURCES}
 """Files with their own shape; every other YAML in the folder describes one field."""
 
 
@@ -54,20 +53,14 @@ class FieldDoc(_Doc):
     known_issues: list[KnownIssue] = []
 
 
-class Flag(_Doc):
-    """One flag in ``record_flags.yaml``."""
+class PortalGroup(_Doc):
+    """One group of records a person checked on the council's planning portal."""
 
-    meaning: str | None = None
-    bot_rule: str | None = None
-    values: dict[str, str] = {}
-    """Each value and what it means (e.g. ``outcome_source``: ``datahub``, ...)."""
-    see: str | None = None
-
-
-class RecordFlags(FieldDoc):
-    """``record_flags.yaml``: the flags derived at load time, each with its rule."""
-
-    flags: dict[str, Flag]
+    ids: list[str]
+    checked: list[str] = []
+    """When only some ``ids`` were read on the portal; the rest match by value."""
+    datahub_had: str | None = None
+    portal_says: str | None = None
 
 
 class Source(_Doc):
@@ -76,6 +69,8 @@ class Source(_Doc):
     name: str
     cite_as: str
     url: str | None = None
+    groups: dict[str, PortalGroup] = {}
+    """For a manual portal check: the records it covers, by group."""
 
 
 class Sources(_Doc):
@@ -106,7 +101,7 @@ class LiveRule(_Live):
 
 
 class DefaultFilter(_Live):
-    """A default filter for one kind of question (from ``database_schema.md``)."""
+    """A default filter for one kind of question (``default_filters`` in ``live_api.yaml``)."""
 
     id: str
     applies_to: str
@@ -146,6 +141,9 @@ class LiveApi(_Live):
     uncovered: str
     citation: LiveCitation
     checked: dict[str, Any]
+    reference_prefix_optional: str | None = None
+    """A prefix some references are published with and some without (Lewisham's
+    "DC/": DC/21/120061 and 21/120061 can be the same application). Lookups try both."""
 
 
 class SemanticLayer(BaseModel):
@@ -156,7 +154,6 @@ class SemanticLayer(BaseModel):
     borough: Borough
     fields: dict[str, FieldDoc]
     """Field files by file name, e.g. ``"status.yaml"``."""
-    flags: RecordFlags
     sources: Sources
     live: LiveApi
     cleaning_rules: dict[str, Any]
@@ -179,14 +176,32 @@ class SemanticLayer(BaseModel):
                 return tuple(doc.values)
         raise KeyError(f"no values listed for field {field!r}")
 
+    def field_doc(self, field: str) -> FieldDoc | None:
+        """Return the field file that explains ``field``, if it has its own.
+
+        Args:
+            field: The field name, e.g. ``"status_stale"``.
+
+        Returns:
+            The field's YAML, or ``None`` (e.g. ``id``, explained in sources.yaml).
+        """
+        return next((doc for doc in self.fields.values() if doc.field == field), None)
+
+    def portal_check(self) -> Source | None:
+        """Return the source that records a person's portal check, if any.
+
+        Returns:
+            The source in ``sources.yaml`` with ``groups``, or ``None``.
+        """
+        return next((s for s in self.sources.sources.values() if s.groups), None)
+
     def prompt_context(self) -> str:
         """Build the data description the system prompt carries.
 
-        Only what live answers can use: for each file explaining a returned field,
-        its meaning and rules (database-only files are left out); the returned
-        flags' meanings and rules; the live rules; the default-filter rules; and the
-        line about what is not covered. The order is fixed, so the text is the same
-        on every request.
+        Only what live answers can use: for each file explaining a returned field
+        (raw or derived, such as status_stale), its meaning and rules; the live
+        rules; the default-filter rules; and the line about what is not covered. The
+        order is fixed, so the text is the same on every request.
 
         A field-file rule that refers to a database-only field is left out: it
         describes the database and would be false for live records. The live rules
@@ -209,16 +224,6 @@ class SemanticLayer(BaseModel):
                 for rule in doc.rules
                 if not _mentions_any(rule, db_only)
             ]
-
-        lines.append("## Flags on records")
-        returned = {ref.field for ref in self.live.returned}
-        for name, flag in self.flags.flags.items():
-            if name not in returned:
-                continue
-            values = [f"{value} = {meaning}" for value, meaning in flag.values.items()]
-            parts = [flag.meaning, *values, flag.bot_rule]
-            if text := " ".join(_one_line(p) for p in parts if p):
-                lines.append(f"- {name}: {text}")
 
         lines.append("## Live data rules")
         lines += [f"- {_one_line(r.rule)}" for r in self.live.live_rules]
@@ -250,7 +255,7 @@ def load_semantic(borough: Borough, root: Path) -> SemanticLayer:
     if not folder.is_dir():
         raise SemanticError(f"semantic folder not found: {folder}")
 
-    for name in (CLEANING, LIVE_API, SOURCES, RECORD_FLAGS):
+    for name in (CLEANING, LIVE_API, SOURCES):
         if not (folder / name).is_file():
             raise SemanticError(f"missing {folder / name}")
 
@@ -262,7 +267,6 @@ def load_semantic(borough: Borough, root: Path) -> SemanticLayer:
     layer = SemanticLayer(
         borough=borough,
         fields=fields,
-        flags=_parse(RecordFlags, folder / RECORD_FLAGS),
         sources=_parse(Sources, folder / SOURCES),
         live=_parse(LiveApi, folder / LIVE_API),
         cleaning_rules=_read_cleaning(folder / CLEANING),
@@ -331,8 +335,6 @@ def _consistency_problems(layer: SemanticLayer, folder: Path) -> list[str]:
     for ref in live.returned + live.database_only:
         if not (folder / ref.see).is_file():
             problems.append(f"{ref.field}: see {ref.see} does not exist")
-        elif ref.see == RECORD_FLAGS and ref.field not in layer.flags.flags:
-            problems.append(f"{ref.field}: not a flag in {RECORD_FLAGS}")
 
     derived = {rule["id"] for rule in layer.cleaning_rules.get("derived", [])}
     record_rules = {rule["id"] for rule in layer.cleaning_rules.get("all_records", [])}

@@ -13,6 +13,7 @@ import pytest
 
 from london_brent_lewisham_chat.chat import (
     NO_REASONING,
+    NO_SUMMARY,
     ROUNDS_USED_UP,
     ChatResult,
     answer,
@@ -27,6 +28,7 @@ from london_brent_lewisham_chat.datahub import (
 from london_brent_lewisham_chat.scope import scope_filter
 from london_brent_lewisham_chat.semantic import SemanticLayer, load_semantic
 from london_brent_lewisham_chat.sessions import Session
+from london_brent_lewisham_chat.tools import Area
 
 SEMANTIC = Path(__file__).parents[1] / "semantic"
 T0 = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
@@ -165,10 +167,9 @@ def ask(
             session or Session(id="demo"),
             openai=fake_openai.client,
             model="gpt-6-luna",
-            instructions=build_instructions(brent),
-            tools=build_tools(brent),
-            semantic=brent,
-            datahub=(fake_datahub or FakeDatahub()).client,
+            instructions=build_instructions([brent]),
+            tools=build_tools([brent]),
+            areas={"brent": Area(brent, (fake_datahub or FakeDatahub()).client)},
             max_rounds=max_rounds,
             max_output_tokens=1000,
         )
@@ -292,7 +293,7 @@ def test_every_request_stores_nothing_at_openai_and_carries_prompt_and_tools(
     for body in fake.bodies:
         assert body["store"] is False
         assert body["include"] == ["reasoning.encrypted_content"]
-        assert body["instructions"] == build_instructions(brent)
+        assert body["instructions"] == build_instructions([brent])
         assert [t["name"] for t in body["tools"]] == [
             "count_applications",
             "get_application_details",
@@ -374,6 +375,21 @@ def test_without_reasoning_the_trace_says_no_reported_reasoning(
 
     assert result.reasoning_summary == NO_REASONING
     assert result.reasoning_tokens == 0
+
+
+def test_reasoning_without_a_summary_is_reported_as_such(
+    brent: SemanticLayer,
+) -> None:
+    # As seen live: an off-topic question, 65 reasoning tokens, no summary text.
+    fake = FakeOpenAI(
+        ["I can only answer about planning in Brent."], reasoning={1: ("", 65)}
+    )
+
+    result = ask(brent, "Who is the president of the United States?", fake)
+
+    assert result.reasoning_tokens == 65
+    assert result.reasoning_summary == NO_SUMMARY.format(tokens=65)
+    assert result.reasoning_summary != NO_REASONING
 
 
 def test_reasoning_summaries_and_tokens_are_collected_over_all_rounds(

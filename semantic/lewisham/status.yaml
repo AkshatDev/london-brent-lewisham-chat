@@ -1,0 +1,107 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: status
+web_label: Status
+meaning: >
+  Current stage or outcome of the application, overwritten as it moves on (no history
+  in the API). Mixes stages (Application Under Consideration, Commenced, Completed),
+  council outcomes (Approved, Refused, Withdrawn, Not Required) and appeal outcomes
+  (Allowed, Dismissed). The council's decision is a separate field: decision.
+schema_definition: >
+  Describes the current status of the application, see Field Values tab for all
+  Status Types
+format: text
+
+# Values after cleaning (live API, 2026-11-11), most common first.
+values:
+  - Approved
+  - Completed
+  - Refused
+  - Lapsed
+  - Withdrawn
+  - Not Required
+  - Superseded
+  - Application Under Consideration
+  - Dismissed
+  - No Objection to Proposal (OBS only)
+  - Allowed
+  - Commenced
+  - Closed
+  - Comment Issued
+  - Appeal Received
+  - Objection Raised to Proposal (OBS only)
+  - Split Decision
+  - Application Invalid
+  - Unknown
+  - Historical
+values_not_in_schema:
+  - Historical   # 1 record, kept as published (known issue migrated_record)
+
+schema_values_never_seen:
+  - Appeal In Progress   # its one record ("Appeal in Progress") is a stale duplicate, dropped
+  - Application Received
+  - Called in by Secretary of State
+  - Declined to Determine
+  - Insufficient Fee
+  - Opinion Issued
+  - Pending Legacy Record
+  - Pre-application Advice Case Completed
+  - Quashed
+  - Referred to Mayor
+  - Revoked
+
+known_issues:
+  - id: status_from_decision
+    count: 22
+    description: >
+      No status in the Datahub but a decision: status is copied from decision
+      (cleaning.yaml, status_from_decision). 16 PRE/ records (Comment Issued,
+      Objection Raised to Proposal (OBS only), Closed) and 6 DC/ records (5
+      Withdrawn, 1 Approved: DC/17/099662, decided 01/05/2020, which may have moved on
+      since).
+
+  - id: outcome_from_portal
+    count: 2
+    description: >
+      Lewisham-DC_21_120320 and Lewisham-DC_22_129646: no status or decision in the
+      Datahub; Lewisham's portal shows Decided, "Granted Deemed Consent" (checked by a
+      person 2026-11-11). Loaded as status and decision Approved.
+
+  - id: unknown_status
+    count: 3
+    description: >
+      Lewisham-DC_21_122223, Lewisham-DC_26_143311, Lewisham-DC_24_138293: no status or
+      decision in the Datahub, and Lewisham's portal shows Status Unknown with no
+      decision either (checked by a person 2026-11-11). Loaded as Unknown.
+
+  - id: stale_duplicates
+    count: 78
+    description: >
+      78 older copies of applications recorded twice (same portal page, two references)
+      are dropped (cleaning.yaml, drop_stale_duplicates). 70 of them still said
+      Application Under Consideration although the current copy has the outcome; with
+      them, pending would be 553 instead of 481.
+
+  - id: migrated_record
+    count: 1
+    description: >
+      Lewisham-95_038596 (95/038596), the only status Historical: a 1995 application,
+      decision Refused, decision_date 30/10/1996, but valid_date 28/11/2023. Lewisham's
+      portal shows Decided, decision "Created during migration", validated 28/11/2023
+      (checked by a person 2026-11-11). Kept as the Datahub publishes it.
+
+rules:
+  - For "was it approved / refused by the council?", read decision, not status.
+  - Pending applications show only as Application Under Consideration; Lewisham never
+    uses Application Received.
+  - 'Unknown: say neither the Datahub nor Lewisham''s planning portal records an outcome
+    (checked 11 November 2026), and give url_planning_app.'
+  - 'Historical (Lewisham-95_038596): give status and decision as the Datahub shows
+    them; say the portal records it as decided on 30/10/1996, "Created during
+    migration". Its 2023 valid_date is likely the migration date (not confirmed); do
+    not present it as a 2023 application.'
+  - For a status taken from the portal (outcome_from_portal), cite the portal check
+    (sources.yaml).
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/status.ipynb, Steps 1-5); knowledge/lewisham_portal_checks.md

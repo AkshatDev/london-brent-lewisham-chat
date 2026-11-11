@@ -1,0 +1,100 @@
+# Source facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+# Where every value the bot gives comes from, and how to cite it.
+field: sources
+web_label: null
+meaning: >
+  Every record comes from the Planning London Datahub's live API, cleaned per record
+  with cleaning.yaml. A few outcomes were checked by a person on Lewisham's planning
+  portal. A citation names the source of the fact actually stated, and says when a
+  value differs from what the Datahub publishes.
+
+sources:
+  datahub:
+    name: Planning London Datahub (Greater London Authority), live API
+    url: https://planningdata.london.gov.uk
+    provides: Every application field, unless one of the sources below is named for it.
+    as_of: >
+      retrieved_at (when the bot read the record) and last_updated (when the Datahub
+      last changed it). The Datahub overwrites records and keeps no history.
+    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), retrieved <retrieved_at>.'
+    licence: not checked
+
+  load_rules:
+    name: This service's cleaning of each live record (semantic/lewisham/cleaning.yaml)
+    provides: Tidied values (case variants) and values taken from the portal check below.
+    cite_as: >
+      Cite the Datahub; for a value from the portal, cite lewisham_portal_manual_check.
+      Tidying (case, spaces) needs no mention.
+
+  lewisham_portal_manual_check:
+    name: London Borough of Lewisham planning portal, read by a person
+    url: https://planning.lewisham.gov.uk/online-applications/
+    checked_on: 2026-11-11
+    provides: >
+      What the portal showed for 10 records with no status that are not empty, the
+      one record with status Historical, and two records sharing a portal page
+      (knowledge/lewisham_portal_checks.md). The service never reads the portal itself;
+      a person opens the pages and records what they say.
+    groups:
+      outcome_from_portal:
+        ids: [Lewisham-DC_21_120320, Lewisham-DC_22_129646]
+        datahub_had: no status, no decision, a decision_date
+        portal_says: Decided, Granted Deemed Consent (loaded as decision Approved)
+      portal_same_gap:
+        ids: [Lewisham-DC_21_122223, Lewisham-DC_26_143311, Lewisham-DC_24_138293]
+        datahub_had: no status, no decision
+        portal_says: Status Unknown, no decision
+      portal_removed:
+        ids: [Lewisham-DC_26_142577, Lewisham-DC_24_134407, Lewisham-DC_24_134442,
+              Lewisham-DC_24_134455, Lewisham-DC_24_137303, Lewisham-DC_18_022222]
+        datahub_had: no outcome (DC/18/022222 says Application Under Consideration)
+        portal_says: '"removed or restricted from public viewing" (dropped at load)'
+      migrated_record:
+        ids: [Lewisham-95_038596]
+        datahub_had: status Historical, decision Refused, decision_date 30/10/1996, valid_date 28/11/2023
+        portal_says: >
+          Decided, decision "Created during migration", decision issued 30/10/1996,
+          validated 28/11/2023 (kept as the Datahub publishes it)
+    cite_as: >
+      'Lewisham planning portal (<url_planning_app>), checked on 11 November 2026; the
+      Planning London Datahub shows <datahub_had>.'
+    licence: not checked
+
+  lewisham_portal_link:
+    name: London Borough of Lewisham planning portal
+    provides: url_planning_app, the page for people to read documents and the decision notice.
+    cite_as: Give the link as "see <url_planning_app>" for documents and to verify.
+
+rules:
+  - When asked for a source, name the source of each fact stated, using cite_as.
+  - Never say "the Datahub says X" when X came from another source; for a value from
+    the portal say what the Datahub shows and that the portal check gives X.
+  - 'outcome_from_portal: say the portal records "Granted Deemed Consent", counted as
+    Approved. Hint, not confirmed: deemed consent usually means the prior approval was
+    granted by default because the council did not decide in time.'
+  - 'portal_same_gap: status Unknown; say neither the Datahub nor Lewisham''s portal
+    records an outcome (checked 11 November 2026).'
+  - 'portal_removed: asked about by id, say "This record is excluded: Lewisham''s planning
+    portal shows it as removed or restricted from public viewing (checked 11 November
+    2026), and the Datahub has no outcome for it."'
+  - 'migrated_record: give status Historical and decision Refused as the Datahub shows
+    them, and say Lewisham''s portal records it as decided on 30/10/1996, "Created during
+    migration". Its 2023 valid_date is likely the migration date (not confirmed); do not
+    present it as a 2023 application.'
+  - Never cite the portal for anything other than what was checked there.
+  - 'consultation_responses: some Lewisham records are Lewisham''s response when another
+    authority consulted it on that authority''s own application (decision No Objection /
+    Objection Raised to Proposal (OBS only), Comment Issued or Closed). The confirmed
+    ones are dropped (cleaning.yaml, drop_consultation_responses); others may remain.
+    If a record clearly concerns a site in another borough (its description or address
+    names that authority or its consultation), say it is a Lewisham comment on another
+    authority''s application, not a Lewisham application, and do not count it as one.
+    A postcode or town alone does not show the borough (BR7 Chislehurst can be
+    Greenwich). Totals of all applications may include a few such records; say so if
+    asked how complete a total is.'
+
+checked:
+  date: 2026-11-11
+  source: >
+    knowledge/lewisham_portal_checks.md, findings/lewisham/status.ipynb (Steps 3 and 4),
+    findings/lewisham/out_of_borough.ipynb

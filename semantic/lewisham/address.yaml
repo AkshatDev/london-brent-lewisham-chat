@@ -1,0 +1,69 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: address
+web_label: null   # derived; the website shows Site name, Site number, Street name, Locality, Postcode
+meaning: >
+  Where the site is, as one text. Built from site_name, completed with site_number,
+  street_name, locality and postcode when site_name is only a number, a single part or
+  missing (as Brent's derived rule "address").
+format: text
+derived_from: [site_name, site_number, street_name, locality, postcode]
+
+values_of_address_kind:
+  - with_full_postcode    # about 81%
+  - several_parts         # street and town, no full postcode
+  - number_only           # about 10%; the other fields complete it
+  - one_part
+  - street_record         # rare (6)
+  - missing
+
+checks_passed:
+  - site_name is filled for 99.8% of records; the 50 without one are completed from
+    street_name and postcode (49 of 50).
+  - Where site_name is a number only, one part or missing (3,787 records), the other
+    fields are there for 3,777.
+
+known_issues:
+  - id: no_full_postcode
+    description: >
+      Not every address has a full postcode: "several parts" site names (1,568) are
+      mostly large sites described in words ("Lewisham Gateway, Lewisham High Street,
+      London, SE13"), often with only the postcode district. 965 have nothing to
+      complete them.
+
+  - id: malformed_postcode
+    count: 17
+    description: >
+      17 postcodes are neither a full postcode nor a district ("SE13 5L", "SE4XY",
+      "SE14 67P", "13 6TS"). Kept as published.
+
+  - id: mixed_parts
+    description: >
+      site_number arrives as JSON numbers and strings (loaded as text) and holds letters,
+      ranges and names ("1a", "7-9", "LEWISHAM HOSPITAL"). Upper and lower case are mixed
+      (360 streets appear in more than one case, e.g. "NEW CROSS ROAD" / "New Cross
+      Road").
+
+  - id: locality_values
+    description: >
+      locality is mostly London or a Lewisham ward name (Brockley, Rushey Green, …);
+      the text "NULL" (6) becomes null at load (cleaning.yaml, locality_null_text). One
+      value is cut off ("LONDO").
+
+  - id: address_does_not_show_borough
+    description: >
+      A postcode district or town in the address does not show the borough: districts
+      such as SE3, SE9, SE10, SE15, SE16, BR1 and BR3 cross borough lines, and 8 Lydstep
+      Road, Chislehurst BR7 is a Greenwich site. Some addresses are really in another
+      borough (consultation responses; sources.yaml, consultation_responses).
+
+rules:
+  - For "where is it?", use address.
+  - For "applications on <street>" or "at <place>", use full-text search on address,
+    case-insensitive; never an exact match.
+  - The same address on several applications usually means the same site.
+  - Don't decide from the postcode or town alone whether a site is in Lewisham; see
+    sources.yaml, consultation_responses.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/address.ipynb, Steps 1-3; findings/lewisham/out_of_borough.ipynb)

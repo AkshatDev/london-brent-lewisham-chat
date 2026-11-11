@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import get_args
 
 import logfire
 from asgi_correlation_id import CorrelationIdMiddleware
@@ -25,8 +26,10 @@ from .log_config import configure_logging
 from .observability import configure_logfire
 from .routers import chat
 from .schemas import Health
+from .scope import Borough
 from .semantic import SemanticError, load_semantic
 from .sessions import SessionStore
+from .tools import Area
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The semantic layer (the borough's YAMLs) is loaded next, once. An invalid or
     inconsistent YAML is logged at ERROR and stops the app: answering with a broken
     description of the data would give wrong answers, which is worse than not
-    starting. Brent only for now; Lewisham is added when its YAMLs exist. The chat
+    starting. Both covered boroughs (Brent and Lewisham, the allow-list in scope.py)
+    are loaded; either one being invalid stops the app. The chat
     instructions and tools are built from it once, here, so every request sends the
     same prompt (which OpenAI's prompt caching can reuse). The session store starts
     empty: sessions live as long as the process.
@@ -69,12 +73,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = app.state.settings
     configure_logging(settings.log_level, to_logfire=True)
     try:
-        app.state.semantic = load_semantic("brent", settings.semantic_dir)
+        layers = {b: load_semantic(b, settings.semantic_dir) for b in get_args(Borough)}
     except SemanticError as exc:
         logger.error("semantic layer invalid", extra={"error": str(exc)})
         raise
-    app.state.instructions = build_instructions(app.state.semantic)
-    app.state.tools = build_tools(app.state.semantic)
+    app.state.layers = layers
+    app.state.instructions = build_instructions(list(layers.values()))
+    app.state.tools = build_tools(list(layers.values()))
     app.state.sessions = SessionStore(
         idle_ttl_s=settings.session_idle_ttl_s,
         max_count=settings.session_max_count,
@@ -83,9 +88,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Kept in locals too, so shutdown closes the clients created here even if
     # app.state was changed meanwhile (tests put fake clients there).
     openai_client = build_openai_client(settings)
-    datahub = build_datahub_client(settings, "brent")
+    clients = {b: build_datahub_client(settings, b) for b in layers}
     app.state.openai = openai_client
-    app.state.datahub = datahub
+    # One Datahub client per borough: each is scoped to its borough (scope.py).
+    app.state.areas = (
+        {b: Area(layers[b], client) for b, client in clients.items()}
+        if all(clients.values())
+        else None
+    )
     logger.info(
         "app started",
         extra={
@@ -96,8 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "openai_configured": openai_client is not None,
             "openai_model": settings.openai_model,
             # Whether the tools can reach the Datahub; the header is never logged.
-            "datahub_configured": datahub is not None,
-            "semantic_fields": len(app.state.semantic.fields),
+            "datahub_configured": app.state.areas is not None,
+            "semantic_fields": {b: len(layer.fields) for b, layer in layers.items()},
         },
     )
     try:
@@ -105,8 +115,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     finally:
         if openai_client is not None:
             await openai_client.close()
-        if datahub is not None:
-            await datahub.aclose()
+        for client in clients.values():
+            if client is not None:
+                await client.aclose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

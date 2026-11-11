@@ -101,16 +101,12 @@ first and deploy once.
 `fastapi deploy` uploads the current files, so check `git branch --show-current` and
 `git status` first. `.fastapicloudignore` keeps `.env*`, `tests/` and `docs/` out.
 
-## Local database (PostGIS) and data pipeline
+## Data pipeline (raw snapshots for the EDA notebooks)
 
-Full cheat sheet (refresh, boundaries, queries, backup/restore, reset):
+The bot is live-API only; snapshots are for analysis. Details:
 [`src/london_brent_lewisham_chat/pipeline/commands.md`](src/london_brent_lewisham_chat/pipeline/commands.md).
 
 ```bash
-docker compose up -d --wait                                            # start PostGIS (127.0.0.1:5433)
-uv run python -m london_brent_lewisham_chat.pipeline extract brent     # today's raw snapshot
-uv run python -m london_brent_lewisham_chat.pipeline postcodes brent   # placeholder centroids
-uv run python -m london_brent_lewisham_chat.pipeline load brent        # snapshot -> PostGIS
-uv run python -m london_brent_lewisham_chat.pipeline push brent        # core.applications -> NEON_DATABASE_URL (.env)
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'   # SQL shell
+uv run python -m london_brent_lewisham_chat.pipeline extract brent      # today's raw snapshot
+uv run python -m london_brent_lewisham_chat.pipeline extract lewisham
 ```

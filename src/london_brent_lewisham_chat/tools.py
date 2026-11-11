@@ -9,8 +9,10 @@ against the cleaned database's counts.
 Two tools so far: ``count_applications`` and ``get_application_details``.
 """
 
+import asyncio
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -27,15 +29,14 @@ from pydantic import (
 
 from .datahub import DatahubClient
 from .pipeline import clean
-from .pipeline.clean import TEST_REFERENCE_PREFIX
 from .scope import BOROUGH_NAMES
-from .semantic import SemanticLayer
+from .semantic import SemanticLayer, Source
 
 logger = logging.getLogger(__name__)
 
 FIRST_YEAR = 1987
 """The earliest year with applications (validated from 1987-04-23 on,
-``semantic/database_schema.md``)."""
+Brent's EDA, ``findings/brent/valid_date.ipynb``)."""
 
 DATE_BASIS_KEY = {"validated": "submissions", "decided": "decisions"}
 """``date_basis`` argument -> key of ``date_field`` in the ``year`` default filter."""
@@ -50,7 +51,8 @@ COUNT_DESCRIPTION = (
     "'validated' when it is when applications came in, e.g. 'validated in 2024', "
     "'submitted in 2024', 'applications in 2024'. "
     "For a follow-up about earlier results ('how many of those were refused?'), "
-    "keep the date_basis and year of the count it refers to. "
+    "keep the date_basis and year of the count it refers to. To compare boroughs, "
+    "count each one with its own call. "
     "Test, empty and duplicate records are excluded, as in the cleaned data."
 )
 
@@ -97,21 +99,24 @@ class _Args(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def count_args_model(semantic: SemanticLayer) -> type[_Args]:
-    """Build the argument model of ``count_applications`` from the semantic layer.
+def count_args_model(semantic: SemanticLayer | Sequence[SemanticLayer]) -> type[_Args]:
+    """Build the argument model of ``count_applications`` from the semantic layers.
 
-    The allowed decisions are the ``values`` of ``decision.yaml`` and the authority
-    is the layer's borough, so nothing is typed by hand and another borough's
-    YAMLs give its own choices.
+    The authorities are the layers' boroughs and the allowed decisions the union of
+    their ``decision.yaml`` values (in file order), so nothing is typed by hand. A
+    decision one borough doesn't use is rejected per call (``count_in``).
 
     Args:
-        semantic: The borough's semantic layer.
+        semantic: One borough's semantic layer, or several.
 
     Returns:
         A Pydantic model whose JSON schema is what the model sees.
     """
-    authority = BOROUGH_NAMES[semantic.borough]
-    decisions = semantic.allowed_values("decision")
+    layers = [semantic] if isinstance(semantic, SemanticLayer) else list(semantic)
+    authorities = tuple(BOROUGH_NAMES[layer.borough] for layer in layers)
+    decisions = tuple(
+        dict.fromkeys(v for layer in layers for v in layer.allowed_values("decision"))
+    )
 
     def check_year(cls: type, value: int) -> int:
         if not FIRST_YEAR <= value <= date.today().year:
@@ -123,8 +128,8 @@ def count_args_model(semantic: SemanticLayer) -> type[_Args]:
         __base__=_Args,
         __validators__={"check_year": field_validator("year")(classmethod(check_year))},
         local_authority=(
-            Literal[authority],
-            Field(description="The local authority. Only this one is covered."),
+            Literal[*authorities],
+            Field(description="The local authority. Only these are covered."),
         ),
         year=(int, Field(description="Calendar year, e.g. 2024.")),
         decision=(
@@ -238,7 +243,11 @@ class DetailsArgs(_Args):
             max_length=40,
             pattern=r"^[A-Za-z0-9/._ -]+$",
         ),
-    ] = Field(description="The application reference, e.g. 18/1022.")
+    ] = Field(description="The application reference, e.g. 18/1022 or DC/24/130001.")
+    local_authority: Literal[*BOROUGH_NAMES.values()] | None = Field(
+        default=None,
+        description="The local authority, if known; otherwise every covered one is searched.",
+    )
 
 
 async def get_application_details(
@@ -273,17 +282,23 @@ async def get_application_details(
         DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
     """
     with logfire.span("tool get_application_details", reference=args.reference) as span:
+        forms = _reference_forms(args.reference, semantic)
         found = await datahub.search(
-            {"match_phrase": {"lpa_app_no": args.reference}},
+            {
+                "bool": {
+                    "should": [{"match_phrase": {"lpa_app_no": f}} for f in forms],
+                    "minimum_should_match": 1,
+                }
+            },
             _excluded_records(semantic),
             size=5,
             fields=semantic.live.request_fields,
         )
-        wanted = _normalise_reference(args.reference)
+        wanted = {_normalise_reference(f) for f in forms}
         matches = [
             record
             for record in found.records
-            if _normalise_reference(record.get("lpa_app_no") or "") == wanted
+            if _normalise_reference(record.get("lpa_app_no") or "") in wanted
         ]
         if len(matches) > 1:
             logger.warning(
@@ -295,7 +310,9 @@ async def get_application_details(
 
     hits = int(found.cached)
     if row is None:
-        result = {"found": False, "reference": args.reference}
+        result: dict[str, Any] = {"found": False, "reference": args.reference}
+        if reason := _excluded_reason(wanted, semantic):
+            result |= {"excluded": True, "reason": reason}
         return ToolOutput(result=result, citations=[], datahub_cache_hits=hits)
 
     application = {
@@ -304,8 +321,8 @@ async def get_application_details(
     if isinstance(application.get("description"), str):
         application["description"] = application["description"][:DESCRIPTION_MAX_CHARS]
     text = _cite_record(semantic, application, found.retrieved_at)
-    if _portal_checked(application, semantic):
-        text += "; " + _cite_portal_check(semantic, application, matches[0])
+    if portal := _portal_check_for(application, semantic):
+        text += "; " + _cite_portal_check(portal, application, matches[0])
     citation = Citation(
         id=citation_id,
         text=text,
@@ -315,10 +332,89 @@ async def get_application_details(
     result = {
         "found": True,
         "application": application,
-        "notes": _flag_notes(application, semantic),
+        "notes": _record_notes(application, semantic),
         "citation": citation_id,
     }
     return ToolOutput(result=result, citations=[citation], datahub_cache_hits=hits)
+
+
+@dataclass(frozen=True)
+class Area:
+    """One covered borough: its semantic layer and its live Datahub client."""
+
+    semantic: SemanticLayer
+    datahub: DatahubClient
+
+
+async def count_in(
+    args: _Args, *, areas: Mapping[str, Area], citation_id: str
+) -> ToolOutput:
+    """Count in the borough the model named, with that borough's rules.
+
+    Args:
+        args: Validated ``count_applications`` arguments.
+        areas: The covered boroughs, by borough key ("brent", "lewisham").
+        citation_id: The id this call's citation gets.
+
+    Returns:
+        The count, or an error the model can correct (a decision value the borough
+        doesn't use).
+
+    Raises:
+        DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
+    """
+    area = areas[args.local_authority.lower()]
+    if args.decision is not None and args.decision not in area.semantic.allowed_values(
+        "decision"
+    ):
+        error = f"{args.decision!r} is not a decision {args.local_authority} uses"
+        return ToolOutput(result={"error": error}, citations=[])
+    return await count_applications(
+        args, semantic=area.semantic, datahub=area.datahub, citation_id=citation_id
+    )
+
+
+async def details_in(
+    args: DetailsArgs, *, areas: Mapping[str, Area], citation_id: str
+) -> ToolOutput:
+    """Look a reference up in the named borough, or in every covered one at once.
+
+    Args:
+        args: Validated ``get_application_details`` arguments.
+        areas: The covered boroughs, by borough key.
+        citation_id: The id the found record's citation gets.
+
+    Returns:
+        The record found; or, if none, an excluded-record explanation when there is
+        one, else "not found".
+
+    Raises:
+        DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
+    """
+    keys = [args.local_authority.lower()] if args.local_authority else list(areas)
+    outputs = await asyncio.gather(
+        *(
+            get_application_details(
+                args,
+                semantic=areas[k].semantic,
+                datahub=areas[k].datahub,
+                citation_id=citation_id,
+            )
+            for k in keys
+        )
+    )
+    hits = sum(o.datahub_cache_hits for o in outputs)
+    found = [o for o in outputs if o.result.get("found")]
+    if found:
+        first = found[0]
+        if len(found) > 1:
+            first.result["notes"].append(
+                "Another covered borough has an application with the same reference; "
+                "ask which borough is meant."
+            )
+        return ToolOutput(first.result, first.citations, hits)
+    excluded = next((o for o in outputs if o.result.get("excluded")), outputs[0])
+    return ToolOutput(excluded.result, [], hits)
 
 
 def _cleaned(
@@ -358,10 +454,18 @@ def _status_stale(row: dict[str, Any], semantic: SemanticLayer, today: date) -> 
     Returns:
         ``True`` when the status is a pending one, there is no decision date and the
         target date is more than ``stale_after_days`` ago; or the id is listed.
+        ``False`` for a borough without the rule.
     """
     rule = next(
-        r for r in semantic.cleaning_rules["derived"] if r["id"] == "status_stale"
+        (
+            r
+            for r in semantic.cleaning_rules.get("derived", [])
+            if r["id"] == "status_stale"
+        ),
+        None,
     )
+    if rule is None:  # no stale rule for this borough yet (Lewisham)
+        return False
     if row.get("id") in rule.get("ids", []):
         return True
     target = row.get("decision_target_date")
@@ -373,29 +477,29 @@ def _status_stale(row: dict[str, Any], semantic: SemanticLayer, today: date) -> 
     )
 
 
-def _flag_notes(application: dict[str, Any], semantic: SemanticLayer) -> list[str]:
-    """Pick the ``bot_rule`` of each flag that applies to this record.
+def _record_notes(application: dict[str, Any], semantic: SemanticLayer) -> list[str]:
+    """Pick the rules of each derived column that applies to this record.
 
     Known issues travel with the record they concern, so the model reads a caveat
-    exactly when it applies. From ``record_flags.yaml``: a flag applies when it is
-    ``True``, or for ``outcome_source`` when the outcome did not come from the
-    Datahub.
+    exactly when it applies. A column applies when it is ``True`` on the record
+    (e.g. status_stale, legacy_record), or for ``outcome_source`` when the outcome did
+    not come from the Datahub. Its rules come from its own field file.
 
     Args:
         application: The record's returned fields.
         semantic: The borough's semantic layer.
 
     Returns:
-        The rules, each on one line, in ``record_flags.yaml``'s order.
+        The rules, each on one line, in the order of live_api.yaml's ``returned``.
     """
     notes = []
-    for name, flag in semantic.flags.flags.items():
-        value = application.get(name)
+    for ref in semantic.live.returned:
+        value = application.get(ref.field)
         applies = value is True or (
-            name == "outcome_source" and value not in (None, "datahub")
+            ref.field == "outcome_source" and value not in (None, "datahub")
         )
-        if applies and flag.bot_rule:
-            notes.append(" ".join(flag.bot_rule.split()))
+        if applies and (doc := semantic.field_doc(ref.field)):
+            notes += [" ".join(rule.split()) for rule in doc.rules]
     return notes
 
 
@@ -424,48 +528,48 @@ def _cite_record(
     return text
 
 
-def _portal_checked(application: dict[str, Any], semantic: SemanticLayer) -> bool:
-    """Tell whether a value of this record came from the manual portal check.
+def _portal_check_for(
+    application: dict[str, Any], semantic: SemanticLayer
+) -> Source | None:
+    """Return the portal-check source if a value of this record came from it.
 
-    As ``sources.yaml`` says the check provides: outcomes with ``outcome_source =
-    portal_manual_check``, deleted appeals, decisions not yet issued, and the
-    records listed in ``cleaning.yaml``'s ``status_stale`` rule.
+    The record is in one of the groups in ``sources.yaml`` (listed by id), or it is
+    a deleted appeal, which cleaning finds by value, so a new one is covered too.
 
     Args:
         application: The record's returned fields.
         semantic: The borough's semantic layer.
 
     Returns:
-        ``True`` if the portal check must be cited for this record.
+        The portal-check source to cite, or ``None``.
     """
-    stale = next(
-        r for r in semantic.cleaning_rules["derived"] if r["id"] == "status_stale"
+    portal = semantic.portal_check()
+    if portal is None:
+        return None
+    in_group = any(
+        application.get("id") in group.ids for group in portal.groups.values()
     )
     return (
-        application.get("outcome_source") == "portal_manual_check"
-        or application.get("appeal_record_deleted") is True
-        or application.get("decision_not_issued") is True
-        or application.get("id") in stale.get("ids", [])
+        portal if in_group or application.get("appeal_record_deleted") is True else None
     )
 
 
 def _cite_portal_check(
-    semantic: SemanticLayer, application: dict[str, Any], raw: dict[str, Any]
+    portal: Source, application: dict[str, Any], raw: dict[str, Any]
 ) -> str:
-    """Fill ``sources.yaml``'s portal-check citation for one record.
+    """Fill the portal-check source's ``cite_as`` template for one record.
 
     ``<datahub_had>`` gets what the live Datahub actually sent for this record
     (before cleaning), so the citation states precisely where the two differ.
 
     Args:
-        semantic: The borough's semantic layer.
+        portal: The portal-check source from ``sources.yaml``.
         application: The record's returned fields.
         raw: The record as the Datahub sent it.
 
     Returns:
         The citation text.
     """
-    template = semantic.sources.sources["brent_portal_manual_check"].cite_as
     had = ", ".join(
         f"{label} {value}"
         if (value := (raw.get(field) or "").strip())
@@ -477,8 +581,64 @@ def _cite_portal_check(
         )
     )
     url = application.get("url_planning_app") or "no portal link"
-    text = " ".join(template.split()).strip("'")
+    text = " ".join(portal.cite_as.split()).strip("'")
     return text.replace("<url_planning_app>", url).replace("<datahub_had>", had)
+
+
+def _reference_forms(reference: str, semantic: SemanticLayer) -> list[str]:
+    """Return the reference as given, and its other form where the borough has one.
+
+    With ``reference_prefix_optional`` (Lewisham's "DC/"), "DC/21/120061" also tries
+    "21/120061", and the other way round (handover: lpa_app_no.yaml).
+
+    Args:
+        reference: The reference as asked.
+        semantic: The borough's semantic layer.
+
+    Returns:
+        One or two references to search.
+    """
+    prefix = semantic.live.reference_prefix_optional
+    if not prefix:
+        return [reference]
+    if _normalise_reference(reference).startswith(_normalise_reference(prefix)):
+        return [reference, reference.strip()[len(prefix) :].lstrip()]
+    return [reference, prefix + reference.strip()]
+
+
+def _excluded_reason(wanted: set[str], semantic: SemanticLayer) -> str | None:
+    """Explain a lookup of a record the cleaning drops on purpose, from sources.yaml.
+
+    A portal-check group whose records are dropped by a rule ``drop_<group>`` (e.g.
+    Lewisham's portal_removed) gets its sentence from ``sources.yaml``'s rules (the
+    one starting with "<group>:") instead of a plain "not found".
+
+    Args:
+        wanted: The normalised references looked up.
+        semantic: The borough's semantic layer.
+
+    Returns:
+        The sentence to give, or ``None``.
+    """
+    portal = semantic.portal_check()
+    if portal is None:
+        return None
+    drop_ids = {
+        r["id"]: set(r.get("ids", []))
+        for r in semantic.cleaning_rules["all_records"]
+        if r["action"] == "drop_records"
+    }
+    for name, group in portal.groups.items():
+        dropped = drop_ids.get(f"drop_{name}", set())
+        for record_id in set(group.ids) & dropped:
+            reference = record_id.split("-", 1)[1].replace("_", "/")
+            if _normalise_reference(reference) in wanted:
+                rule = next(
+                    (r for r in semantic.sources.rules if r.startswith(f"{name}:")),
+                    None,
+                )
+                return " ".join(rule.split(":", 1)[1].split()) if rule else None
+    return None
 
 
 def _normalise_reference(reference: str) -> str:
@@ -569,7 +729,8 @@ def _excluded_records(semantic: SemanticLayer) -> dict[str, Any]:
 
     From ``cleaning.yaml``: the ids listed in the drop rules, the empty-record
     condition (all its fields missing: the Datahub sends empty fields as missing,
-    never ``""``, checked 2026-11-11), and test references (``55/``), matched on
+    never ``""``, checked 2026-11-11), and test references (the borough's
+    ``reference_prefix``), matched on
     ``id`` because ``id`` is a keyword field and ``lpa_app_no`` is not.
 
     Args:
@@ -584,11 +745,11 @@ def _excluded_records(semantic: SemanticLayer) -> dict[str, Any]:
         if rule["action"] == "drop_records"
     ]
     ids = sorted({record_id for rule in rules for record_id in rule.get("ids", [])})
-    test_prefix = TEST_REFERENCE_PREFIX.replace("/", "_")
-    must_not: list[dict[str, Any]] = [
-        {"ids": {"values": ids}},
-        {"prefix": {"id": f"{BOROUGH_NAMES[semantic.borough]}-{test_prefix}"}},
-    ]
+    must_not: list[dict[str, Any]] = [{"ids": {"values": ids}}]
+    if prefix := clean.test_reference_prefix(semantic.cleaning_rules):
+        # The id is "<Borough>-" + the reference with "/" as "_".
+        id_prefix = f"{BOROUGH_NAMES[semantic.borough]}-{prefix.replace('/', '_')}"
+        must_not.append({"prefix": {"id": id_prefix}})
     for rule in rules:
         if fields := rule.get("when_all_null"):
             must_not.append(

@@ -9,7 +9,6 @@ import pytest
 import yaml
 
 from london_brent_lewisham_chat.semantic import (
-    RECORD_FLAGS,
     SemanticError,
     SemanticLayer,
     load_semantic,
@@ -52,8 +51,17 @@ def test_every_returned_field_is_explained_by_an_existing_file(
 ) -> None:
     for ref in brent.live.returned:
         assert (SEMANTIC / "brent" / ref.see).is_file(), ref
-        if ref.see == RECORD_FLAGS:
-            assert ref.field in brent.flags.flags, ref
+    # Derived columns have their own field file (no flags file any more).
+    for name in (
+        "outcome_source",
+        "appeal_record_deleted",
+        "decision_not_issued",
+        "status_stale",
+        "approximate_decision_date",
+        "legacy_record",
+    ):
+        assert brent.field_doc(name) is not None, name
+    assert not (SEMANTIC / "brent" / "record_flags.yaml").exists()
 
 
 def test_allowed_values_come_from_the_field_yaml(brent: SemanticLayer) -> None:
@@ -63,29 +71,26 @@ def test_allowed_values_come_from_the_field_yaml(brent: SemanticLayer) -> None:
         brent.allowed_values("description")  # free text: no list of values
 
 
-def test_the_prompt_leaves_out_rules_that_only_hold_in_the_database(
-    brent: SemanticLayer,
-) -> None:
+def test_the_prompt_relies_on_nothing_database_only(brent: SemanticLayer) -> None:
     prompt = brent.prompt_context()
-    # borough.yaml and address.yaml claim every record was checked by location:
-    # true in the database (location_check), not for live records.
-    assert "checked by location" not in prompt
-    # "site" as a plain word is not the database-only site column: rule kept.
-    assert "usually means the same site" in prompt
-    # The live rule names ward_2022 on purpose and stays.
-    assert "Live records have no ward_2022" in prompt
+    # The database was dropped: no database-only column or file is named, and scope is
+    # explained by the live query, not a location check of live records.
+    for name in ("location_check", "ward_2022", "location.yaml", "core.applications"):
+        assert name not in prompt
+    assert "Every record is in Brent by scope" in prompt
+    assert "records added since then were not" in prompt  # the snapshot check, dated
+    assert "say the bot does not cover wards yet" in prompt
 
 
 def test_the_prompt_carries_meanings_flags_live_rules_and_the_uncovered_line(
     brent: SemanticLayer,
 ) -> None:
     prompt = brent.prompt_context()
-    for heading in ("## Fields", "## Flags on records", "## Live data rules"):
+    for heading in ("## Fields", "## Live data rules"):
         assert heading in prompt
     assert '"Validated in <year>" means valid_date in that year' in prompt
-    assert "- status_stale:" in prompt
+    assert "### status_stale" in prompt  # a derived column, from its own file
     assert "say it is not covered yet rather than guess" in prompt
-    assert "### location_check" not in prompt  # database-only file left out
 
 
 def test_the_prompt_is_stable_and_within_budget(brent: SemanticLayer) -> None:

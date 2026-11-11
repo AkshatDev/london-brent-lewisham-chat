@@ -1,0 +1,60 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: lpa_app_no
+web_label: LPA Number
+meaning: >
+  The planning application reference given by Lewisham (e.g. DC/21/120320), as people
+  quote it. The record id is "Lewisham-" plus this reference with "/" replaced by "_"
+  (e.g. Lewisham-DC_21_120320).
+schema_definition: Describes the reference number assigned by the Local Planning Authority
+format: text
+
+checks_passed:
+  - Every record has one; every value is a string.
+  - Every reference is unique (checked trimmed and upper-cased); but see
+    same_application_two_references.
+  - id is always "Lewisham-" + lpa_app_no with "/" -> "_" (29,021 of 29,021).
+  - TEST references are all test records, dropped at load (cleaning.yaml,
+    drop_test_records).
+
+known_issues:
+  - id: two_families_of_format
+    description: >
+      Current references are DC/yy/nnnnnn (most records, CSV import), also yy/nnnnnn
+      without a prefix (106 before cleaning, 38 of them dropped as stale duplicates) and
+      PRE/yy/nnnnnn (37 after cleaning; decision.yaml, pre_cases). Legacy
+      imports use older styles: DCyy/nnnnn, DCyy/nnnnnn, DCnnnnnnn, DCnnnnn, and rare ones
+      with letters (DC0046436A, DCDE151ATP, DCLE240155TP).
+  - id: year_not_always_in_reference
+    description: >
+      DC/21/... and DC06/... show the year; DC0045808 and DC21155 don't. The number of
+      digits also varies (DC/13/83358 next to DC/13/082322).
+  - id: same_application_two_references
+    count: 78
+    description: >
+      78 applications were recorded twice under two different references that point to
+      the same portal page: with and without "DC/" (DC/20/116497 and 20/116497; 74 pairs)
+      or with a different year (DC/22/125155 and DC/21/125155; 4). The references differ,
+      so they look unique. The older copy of each is dropped (cleaning.yaml,
+      drop_stale_duplicates, 78 ids). One more page is shared by DC/18/022222 and a test
+      record; both are dropped (drop_portal_removed, drop_test_records)
+      (findings/lewisham/url_planning_app.ipynb, Steps 2-4). A reference without "DC/"
+      (e.g. 21/120061) can be the current copy.
+
+  - id: x_suffix
+    count: 1
+    description: >
+      DC/13/082322/X ends in /X; a real application (Lewisham's portal shows the same
+      reference). What /X means is not known (valid_date.yaml, valid_after_decision).
+
+rules:
+  - '"Tell me about DC/21/120320" is a lookup on lpa_app_no; it returns at most one
+    record. Match the exact reference (case and spaces aside); never rebuild it from
+    parts. If nothing is found, the same application may be under the reference with or
+    without "DC/" (e.g. 21/120061 for DC/21/120061); try that once and say so.'
+  - Use lpa_app_no, not id, when showing a reference to people.
+  - Never read the year of an application from its reference; use valid_date or
+    decision_date.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/lpa_app_no.ipynb, Steps 1-3; findings/lewisham/url_planning_app.ipynb, Steps 2-4)

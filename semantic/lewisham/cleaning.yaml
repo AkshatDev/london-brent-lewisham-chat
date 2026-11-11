@@ -1,0 +1,333 @@
+# Cleaning of each live record, Lewisham only (golden rule). Not chat bot context: the
+# field files describe the data as it is after these rules.
+# Applied in this order: all_records, then fields, then derived.
+# Actions: strip, fill_null, drop_records, set_outcome, map, copy_when_null, to_text,
+# derive.
+# Rules are added field by field as the Lewisham EDA goes on (findings/lewisham/).
+
+all_records:
+  - id: strip_whitespace
+    action: strip
+    applies_to: all_text_fields
+    decided: 2026-11-11
+    reason: >
+      Same as Brent: leading/trailing whitespace hides values from exact matches.
+      How many Lewisham values it changes is not measured.
+
+  - id: blank_to_null
+    action: fill_null
+    applies_to: all_text_fields
+    decided: 2026-11-11
+    reason: >
+      Same as Brent: after stripping, an empty text means nothing was recorded, so
+      "missing" is written one way only. The empty-record count below treats empty
+      text as missing, so it relies on this rule.
+
+  - id: drop_test_records
+    action: drop_records
+    reference_prefix: TEST   # an unlisted reference with this start is a new test record
+    decided: 2026-11-11
+    reason: >
+      Test records, not real applications ("TEST DESCRIPTION", "Test Test", "TEST CASE
+      NOT A LIVE CASE", "This is test data to produce a draft Decison Notice", a
+      template with "[insert relevant legislation]"), although they carry real Lewisham
+      addresses and portal URLs. Every TEST reference in Lewisham is one of these 6
+      (findings/lewisham/decision.ipynb, Steps 8-9). Same rule as Brent's (there the
+      marker is 55/). A new TEST reference should stop the load for a look; clean_record
+      checks only 55/ today (handover).
+    ids:
+      - Lewisham-TEST_13_022223_X
+      - Lewisham-TEST_18_022222
+      - Lewisham-TEST_22_022222
+      - Lewisham-TEST_22_022223
+      - Lewisham-TEST_69_022223
+      - Lewisham-TEST_80_022222_X
+
+  - id: drop_empty_records
+    action: drop_records
+    when_all_null: [status, decision, decision_date, description]
+    expected_count: 1151
+    decided: 2026-11-11
+    reason: >
+      Empty records: no status, decision, decision_date or description (1,150 also
+      have no URL). Nothing in them can answer a question. Same condition as Brent's
+      rule; unlike Brent, most have a borough (only 452 of the 1,151 have none).
+      Live API 2026-11-11 (findings/lewisham/status.ipynb, Step 2).
+
+  - id: drop_portal_removed
+    action: drop_records
+    decided: 2026-11-11
+    reason: >
+      No outcome in the Datahub, and Lewisham's planning portal shows the page as
+      "removed or restricted from public viewing" (checked by a person 2026-11-11,
+      knowledge/lewisham_portal_checks.md). Asked about by id, the bot explains the
+      exclusion (sources.yaml, portal_removed).
+    ids:
+      - Lewisham-DC_26_142577
+      - Lewisham-DC_24_134407
+      - Lewisham-DC_24_134442
+      - Lewisham-DC_24_134455
+      - Lewisham-DC_24_137303
+      - Lewisham-DC_18_022222   # Under Consideration, no decision; its URL is reused by the test record TEST/18/022222 and its description is the same template text ("[(existing/proposed)]"); possibly a test record, not confirmed (findings/lewisham/url_planning_app.ipynb, Step 3)
+
+  - id: drop_consultation_responses
+    action: drop_records
+    decided: 2026-11-11
+    reason: >
+      Not Lewisham applications: Lewisham's response when another authority consulted
+      it on that authority's own application (decision No Objection to Proposal (OBS
+      only), Comment Issued or Closed). The Datahub records the response with borough
+      Lewisham, but the site is in the other borough and the application is counted
+      there (golden rule: scope by location). Each id was confirmed against the other
+      authority's record: same address, a real decision soon after Lewisham's response,
+      same proposal (findings/lewisham/out_of_borough.ipynb, Steps 1, 4 and 5; read-only
+      EDA exception approved by the user 2026-11-11). Only confirmed ids are listed;
+      Lewisham's own opinions (EIA screening, construction hours) use the same decision
+      values and are kept, so there is no condition. Unconfirmed candidates stay loaded
+      (sources.yaml, consultation_responses rule for the bot). Lewisham-DC_21_122776
+      (57 Cator Road) was left out: same address as a Bromley application, but a
+      different description.
+    ids:
+      - Lewisham-DC_19_111843   # 43 Winn Road -> Greenwich
+      - Lewisham-DC_19_113245   # 101A Lee Road -> Greenwich
+      - Lewisham-DC_19_114677   # 8 Lydstep Road -> Greenwich 19/3662/HD
+      - Lewisham-DC_22_127453   # 45 Lee Road -> Greenwich
+      - Lewisham-DC_22_129609   # 143 Lee Road -> Greenwich
+      - Lewisham-DC_23_131797   # 89 Winn Road -> Greenwich
+      - Lewisham-DC_23_132609   # 62 Royal Hill -> Greenwich
+      - Lewisham-DC_23_132610   # 62 Royal Hill -> Greenwich
+      - Lewisham-DC_24_134968   # 43 Crosslet Vale -> Greenwich
+      - Lewisham-DC_25_138839   # 81 Lee Road -> Greenwich
+      - Lewisham-DC_25_140753   # 35 Crosslet Vale -> Greenwich
+      - Lewisham-DC_19_113239   # 840 Old Kent Road -> Southwark
+      - Lewisham-DC_21_120099   # 10 Evelina Road -> Southwark
+      - Lewisham-DC_23_130171   # 19-49 Bush Road -> Southwark
+      - Lewisham-DC_21_122666   # 120 Fleet Street -> City of London 21/00538/FULEIA (Step 5)
+
+  - id: drop_stale_duplicates
+    action: drop_records
+    decided: 2026-11-11
+    reason: >
+      The same application recorded twice, under two references that point to the same
+      portal page: the same number with and without "DC/" (74 pairs) or with a different
+      year (4); 78 ids. In every pair one copy was updated on 2026-11-10 and has the outcome; the
+      other stopped being updated (mostly 2025-05-12) and 70 of them still say
+      Application Under Consideration. The older copy is dropped, the current one kept,
+      as with Brent's drop_opdc_duplicates. The "DC/" prefix does not tell which copy is
+      current; last_updated does (findings/lewisham/url_planning_app.ipynb, Steps 2-4).
+      DC/20/116497 / 20/116497 disagreed (Withdrawn / Approved); Lewisham's portal shows
+      reference 20/116497, Granted 10/06/2020 (checked by a person 2026-11-11), so
+      DC/20/116497 is the copy dropped. DC/18/022222, whose URL a test record reuses, is
+      in drop_portal_removed.
+    ids:
+      - Lewisham-21_122056   # current copy: DC/21/122056
+      - Lewisham-21_123241   # current copy: DC/21/123241
+      - Lewisham-22_126072   # current copy: DC/22/126072
+      - Lewisham-22_126814   # current copy: DC/22/126814
+      - Lewisham-22_126855   # current copy: DC/22/126855
+      - Lewisham-22_127022   # current copy: DC/22/127022
+      - Lewisham-22_127239   # current copy: DC/22/127239
+      - Lewisham-22_127549   # current copy: DC/22/127549
+      - Lewisham-22_127581   # current copy: DC/22/127581
+      - Lewisham-22_127819   # current copy: DC/22/127819
+      - Lewisham-22_127960   # current copy: DC/22/127960
+      - Lewisham-22_127961   # current copy: DC/22/127961
+      - Lewisham-22_127999   # current copy: DC/22/127999
+      - Lewisham-22_128328   # current copy: DC/22/128328
+      - Lewisham-22_128596   # current copy: DC/22/128596
+      - Lewisham-22_129239   # current copy: DC/22/129239
+      - Lewisham-22_129589   # current copy: DC/22/129589
+      - Lewisham-22_129597   # current copy: DC/22/129597
+      - Lewisham-22_129653   # current copy: DC/22/129653
+      - Lewisham-23_129970   # current copy: DC/23/129970
+      - Lewisham-23_130222   # current copy: DC/23/130222
+      - Lewisham-23_130832   # current copy: DC/23/130832
+      - Lewisham-23_131283   # current copy: DC/23/131283
+      - Lewisham-23_131477   # current copy: DC/23/131477
+      - Lewisham-23_131591   # current copy: DC/23/131591
+      - Lewisham-23_131879   # current copy: DC/23/131879
+      - Lewisham-23_132192   # current copy: DC/23/132192
+      - Lewisham-23_132601   # current copy: DC/23/132601
+      - Lewisham-23_132604   # current copy: DC/23/132604
+      - Lewisham-23_132605   # current copy: DC/23/132605
+      - Lewisham-23_132606   # current copy: DC/23/132606
+      - Lewisham-23_132928   # current copy: DC/23/132928
+      - Lewisham-23_132931   # current copy: DC/23/132931
+      - Lewisham-23_134247   # current copy: DC/23/134247
+      - Lewisham-24_134378   # current copy: DC/24/134378
+      - Lewisham-24_136279   # current copy: DC/24/136279
+      - Lewisham-24_138068   # current copy: DC/24/138068
+      - Lewisham-26_144515   # current copy: DC/26/144515
+      - Lewisham-DC_19_111255   # current copy: 19/111255
+      - Lewisham-DC_21_120061   # current copy: 21/120061
+      - Lewisham-DC_21_120074   # current copy: 21/120074
+      - Lewisham-DC_21_120075   # current copy: 21/120075
+      - Lewisham-DC_21_120309   # current copy: 21/120309
+      - Lewisham-DC_21_120357   # current copy: 21/120357
+      - Lewisham-DC_22_126010   # current copy: 22/126010
+      - Lewisham-DC_22_126122   # current copy: 22/126122
+      - Lewisham-DC_22_126791   # current copy: 22/126791
+      - Lewisham-DC_22_127101   # current copy: 22/127101
+      - Lewisham-DC_22_127328   # current copy: 22/127328
+      - Lewisham-DC_22_127524   # current copy: 22/127524
+      - Lewisham-DC_22_127652   # current copy: 22/127652
+      - Lewisham-DC_22_127739   # current copy: 22/127739
+      - Lewisham-DC_22_127741   # current copy: 22/127741
+      - Lewisham-DC_22_127933   # current copy: 22/127933
+      - Lewisham-DC_22_127942   # current copy: 22/127942
+      - Lewisham-DC_22_127943   # current copy: 22/127943
+      - Lewisham-DC_22_127945   # current copy: 22/127945
+      - Lewisham-DC_22_129656   # current copy: 22/129656
+      - Lewisham-DC_22_129657   # current copy: 22/129657
+      - Lewisham-DC_22_129659   # current copy: 22/129659
+      - Lewisham-DC_22_129660   # current copy: 22/129660
+      - Lewisham-DC_22_129661   # current copy: 22/129661
+      - Lewisham-DC_22_129662   # current copy: 22/129662
+      - Lewisham-DC_22_129664   # current copy: 22/129664
+      - Lewisham-DC_23_131286   # current copy: 23/131286
+      - Lewisham-DC_23_131406   # current copy: 23/131406
+      - Lewisham-DC_23_131469   # current copy: 23/131469
+      - Lewisham-DC_23_131672   # current copy: 23/131672
+      - Lewisham-DC_23_131714   # current copy: 23/131714
+      - Lewisham-DC_23_131721   # current copy: 23/131721
+      - Lewisham-DC_23_131729   # current copy: 23/131729
+      - Lewisham-DC_23_131956   # current copy: 23/131956
+      - Lewisham-DC_23_131975   # current copy: 23/131975
+      - Lewisham-DC_22_125155   # current copy: DC/21/125155
+      - Lewisham-DC_22_125763   # current copy: DC/21/125763
+      - Lewisham-DC_22_125765   # current copy: DC/21/125765
+      - Lewisham-DC_22_129784   # current copy: DC/23/129784
+      - Lewisham-DC_20_116497   # current copy: 20/116497 (portal: Granted 10/06/2020; this copy said Withdrawn)
+
+  - id: outcome_from_portal
+    action: set_outcome
+    only_when_null: [status, decision]
+    sets: [status, decision]
+    source: portal_manual_check
+    expected_count: 2
+    decided: 2026-11-11
+    reason: >
+      These records have a decision_date but no status and no decision. Lewisham's
+      planning portal (checked by a person, 2026-11-11) shows each as Decided,
+      "Granted Deemed Consent", with the Decision Issued Date equal to our
+      decision_date. "Granted Deemed Consent" is not a schema value and no Lewisham
+      record uses "deemed"; it is loaded as Approved, a permission to go ahead
+      (findings/lewisham/application_type.ipynb, Step 1). Applied only while the
+      Datahub still has both fields empty. DC/21/122223, DC/26/143311 and
+      DC/24/138293 are Unknown on the portal too, so they stay Unknown
+      (empty_to_unknown).
+    outcomes:
+      Lewisham-DC_21_120320: Approved   # portal: Decided, Granted Deemed Consent
+      Lewisham-DC_22_129646: Approved   # portal: Decided, Granted Deemed Consent
+
+fields:
+  status:
+    - id: appeal_in_progress_case
+      action: map
+      from: Appeal in Progress
+      to: Appeal In Progress
+      decided: 2026-11-11
+      reason: >
+        Case variant of the schema value; same rule as Brent. The 1 record with it
+        (Lewisham-22_127022) is an older duplicate dropped by drop_stale_duplicates, so the
+        rule matches 0 records today; kept in case the value comes back.
+
+    - id: status_from_decision
+      action: copy_when_null   # new action: clean_record does not support it yet (handover)
+      from: decision
+      to: status
+      expected_count: 22
+      decided: 2026-11-11
+      reason: >
+        No status but a decision: 16 PRE/ records (Comment Issued 12, Objection Raised
+        to Proposal (OBS only) 2, Closed 2) and 6 DC/ records (Withdrawn 5, Approved 1,
+        DC/17/099662). Every one of these decisions is also a schema status value, and
+        a decided record's status normally equals its decision (15,062 Lewisham records
+        have status Approved). Like any Approved status, it may since have moved on
+        (Completed, Lapsed) without the Datahub knowing. Runs after
+        outcome_from_portal and before empty_to_unknown. New for Lewisham: Brent never
+        had a record with a decision and no status
+        (findings/lewisham/status.ipynb, Step 3).
+
+    - id: empty_to_unknown
+      action: fill_null
+      to: Unknown
+      decided: 2026-11-11
+      reason: >
+        No status recorded; Unknown is a schema value. After the rules above, 3
+        records: the ones Lewisham's portal could not resolve either (DC/21/122223,
+        DC/26/143311, DC/24/138293; sources.yaml, portal_same_gap).
+
+  decision:
+    - id: not_required_case
+      action: map
+      from: Not required
+      to: Not Required
+      decided: 2026-11-11
+      reason: >
+        Case variant of the schema value (1 record, Lewisham-DC_15_09720, whose status
+        is already Not Required; findings/lewisham/decision.ipynb, Step 2).
+
+  site_number:
+    - id: site_number_as_text
+      action: to_text
+      decided: 2026-11-11
+      reason: >
+        Same as Brent. The schema type is string, but 1,568 values come as JSON numbers
+        and 2,243 as digit strings; 224 numbers arrive both ways (2 and "2"). Store every
+        value as text, numbers without a decimal part (2 -> "2"), so 2 and "2" are the
+        same value (findings/lewisham/address.ipynb, Steps 1 and 3).
+
+  locality:
+    - id: locality_null_text
+      action: map
+      from: "NULL"
+      to: null
+      decided: 2026-11-11
+      reason: >
+        6 records have the text "NULL" in locality: a placeholder, not a place. Without
+        this rule the bot could show "NULL" as part of an address
+        (findings/lewisham/address.ipynb, Step 3).
+
+derived:
+  - id: address
+    action: derive
+    columns: [address, address_kind]
+    from: [site_name, site_number, street_name, locality, postcode]
+    decided: 2026-11-11
+    address_kind: >
+      As Brent's derived rule "address" (same order of kinds): missing, number_only,
+      street_record, with_full_postcode, several_parts, one_part.
+    address: >
+      As Brent's: with_full_postcode, several_parts, street_record: address = site_name.
+      number_only, one_part, missing: join site_name, site_number (only if different
+      from site_name), street_name, locality and postcode with ", ", skipping empty
+      parts. The field rules on the address parts (locality_null_text) run first.
+    reason: >
+      site_name is a full address for about 81% of records; where it is a number only,
+      one part or missing (3,787), the other fields complete it for 3,777. One column
+      means the bot can't pick the wrong field (address.yaml;
+      findings/lewisham/address.ipynb).
+
+  - id: legacy_record
+    action: derive
+    columns: [legacy_record]
+    from: [bo_system]
+    when_equals: {bo_system: FME Legacy Data Import}   # read by clean_record
+    decided: 2026-11-11
+    rule: legacy_record = true when bo_system is "FME Legacy Data Import", else false.
+    reason: >
+      Legacy records (4,312) never have valid_date, decision_target_date or
+      url_planning_app; the flag lets the bot explain the empty fields instead of
+      treating them as gaps. Only FME Legacy Data Import is legacy: the 33 records with
+      bo_system Portal are ordinary applications (findings/lewisham/bo_system.ipynb).
+
+# No rule, on purpose:
+#   - status "Historical" (Lewisham-95_038596 only): kept as the Datahub publishes it
+#     (decision Refused, 30/10/1996). The portal shows Decided, decision "Created during
+#     migration", validated 28/11/2023 (checked by a person 2026-11-11). The bot's
+#     context for it is a known issue in status.yaml.
+#   - Unconfirmed consultation responses (borough Lewisham, site in another borough):
+#     no condition separates them from Lewisham's own opinions, so only confirmed ids
+#     are dropped (drop_consultation_responses); the bot is told how to treat one whose
+#     site is outside Lewisham.

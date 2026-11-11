@@ -3,7 +3,7 @@ field: lpa_name
 web_label: null   # not one of the website's 16 columns
 meaning: >
   The local planning authority that decides the application. Not where the site is:
-  every record here is in Brent (borough, location.yaml), whoever decided it.
+  every record here is in Brent (by scope, borough.yaml), whoever decided it.
 schema_definition: Contains the Local Planning Authority name, see Field Values tab for all available LPAs
 format: text
 
@@ -14,7 +14,7 @@ values:
 
 checks_passed:
   - Every record has a value.
-  - The 3 applications recorded under both Brent and OPDC were decided by Brent
+  - The 4 applications recorded under both Brent and OPDC were decided by Brent
     (Brent case officer, delegated decision; Brent's planning portal, checked
     2026-11-10); the Brent copy is kept.
 

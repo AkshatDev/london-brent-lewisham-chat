@@ -1,30 +1,31 @@
 # Source facts for the chat bot, Brent only (golden rule). Describes the data after cleaning.yaml.
-# Where every value in core.applications comes from, and how to cite it.
+# Where every value the bot reads comes from (live API, then cleaning), and how to cite it.
 field: sources
 web_label: null
 meaning: >
-  The database is built from one main source (the Planning London Datahub) and
-  corrected or completed from four others. A citation names the source of the fact
-  actually stated, and says when a value differs from what the Datahub publishes.
+  Every record comes from the Planning London Datahub's live API, cleaned per record
+  (cleaning.yaml); a few values come from a person's check of Brent's planning portal.
+  A citation names the source of the fact actually stated, and says when a value
+  differs from what the Datahub publishes.
 
 sources:
   datahub:
-    name: Planning London Datahub (Greater London Authority)
+    name: Planning London Datahub (Greater London Authority), live API
     url: https://planningdata.london.gov.uk
     provides: Every application field, unless one of the sources below is named for it.
     as_of: >
-      snapshot_date (the day we downloaded it; 2026-11-10) and last_updated (when the
-      Datahub last changed the record). The Datahub overwrites records and keeps no
-      history.
-    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), downloaded <snapshot_date>.'
+      retrieved_at (when the bot read the record) and last_updated (when the Datahub
+      last changed it). The Datahub overwrites records and keeps no history.
+    cite_as: 'Planning London Datahub, application <lpa_app_no> (record <id>), retrieved <retrieved_at>.'
     licence: not checked
 
   load_rules:
-    name: This service's load-time cleaning (semantic/brent/cleaning.yaml)
+    name: This service's cleaning of each live record (semantic/brent/cleaning.yaml)
     provides: >
       Tidied values (whitespace, case variants, empty status -> Unknown, 2 portal URLs
-      repaired) and derived columns: address, address_kind, legacy_record, the flags in
-      record_flags.yaml.
+      repaired) and derived columns: address, address_kind, legacy_record,
+      outcome_source, appeal_record_deleted, decision_not_issued, status_stale,
+      approximate_decision_date (each explained in its own field file).
     cite_as: >
       Cite the Datahub; for a derived column add "derived from <fields>". Tidying
       (case, spaces) needs no mention.
@@ -34,14 +35,56 @@ sources:
     url: https://pa.brent.gov.uk/online-applications/
     checked_on: 2026-11-10
     provides: >
-      Outcomes where outcome_source = portal_manual_check (11); the meaning of the
-      Datahub's ZZZ (appeal_record_deleted, 16); decision_not_issued (2);
-      Brent-96_1985 (status_stale). The service never reads the portal itself (its
-      robots.txt disallows automated access).
-    datahub_had: >
-      outcome_from_portal: no status, no decision. stale_outcome_from_portal: status
-      Application Received / Under Consideration. appeal_record_deleted: status and
-      appeal_decision ZZZ, appeal_decision_date set. decision_not_issued: as loaded.
+      What the portal showed for the records in the groups below
+      (knowledge/brent_portal_checks.md; for Brent-96_1985, the note on the status_stale
+      rule in cleaning.yaml). The service never reads the portal itself
+      (its robots.txt disallows automated access); a person opens the pages and records
+      what they say.
+    groups:
+      outcome_from_portal:
+        ids: [Brent-17_5180, Brent-18_0025, Brent-18_0037, Brent-18_0089, Brent-18_0129,
+              Brent-18_0557, Brent-18_2109, Brent-19_1286, Brent-23_2560]
+        datahub_had: no status, no decision, a decision_date
+        portal_says: >
+          Decided, with the decision (Grant / Refuse Planning Permission; prior
+          approval granted or refused), loaded as decision Approved or Refused
+          (outcome_source = portal_manual_check)
+      portal_same_gap:
+        ids: [Brent-18_3324]
+        datahub_had: no status, no decision, a decision_date
+        portal_says: Decided, "Decision Not Available" (left as status Unknown)
+      stale_outcome_from_portal:
+        ids: [Brent-23_0650, Brent-20_4264]
+        datahub_had: status Application Received, no decision
+        portal_says: >
+          23/0650: Decided, prior approval required and approved, 21/04/2023.
+          20/4264: appeal decided, Appeal Allowed, no council decision shown
+          (outcome_source = portal_manual_check)
+      deleted_appeal:
+        ids: [Brent-18_0301, Brent-20_2457, Brent-20_2995, Brent-20_2996, Brent-20_3337,
+              Brent-20_3381, Brent-21_1554, Brent-22_0506, Brent-22_1501, Brent-22_2832,
+              Brent-22_2833, Brent-23_2861, Brent-23_3283, Brent-24_0041, Brent-25_0634,
+              Brent-25_1656]
+        checked: [Brent-18_0301, Brent-22_2833, Brent-25_1656]
+        datahub_had: status ZZZ, appeal_decision ZZZ, decision Refused, an appeal_decision_date
+        portal_says: >
+          Refused; Appeal Decision "Technically Deleted Record" (read on the portal for
+          the 3 in checked; the other 13 have the same Datahub values and are treated
+          the same way, by value: cleaning.yaml, deleted_appeal; appeal_record_deleted)
+      decision_not_issued:
+        ids: [Brent-25_3290, Brent-26_1174]
+        datahub_had: status Application Under Consideration, decision Approved, no decision_date
+        portal_says: Awaiting decision, subject to a Section 106 agreement (decision_not_issued)
+      status_stale_listed:
+        ids: [Brent-96_1985]
+        datahub_had: status Appeal In Progress since 1996
+        portal_says: Appeal lodged, no appeal decision, no documents (status_stale)
+      page_removed:
+        ids: [Brent-25_2602]
+        datahub_had: status Application Under Consideration, no decision
+        portal_says: >
+          "Planning application details not available" (page removed); kept as the
+          Datahub publishes it (status_stale by date)
     cite_as: >
       'Brent planning portal (<url_planning_app>), checked on 10 November 2026; the
       Planning London Datahub shows <datahub_had>.'
@@ -52,30 +95,11 @@ sources:
     provides: url_planning_app, the page for people to read documents and the decision notice.
     cite_as: Give the link as "see <url_planning_app>" for documents and to verify.
 
-  ons_geography:
-    name: Office for National Statistics, Open Geography Portal
-    url: https://geoportal.statistics.gov.uk
-    provides: >
-      location_check and ward_2022, from the Brent boundary (Local Authority Districts,
-      December 2024, BFC) and Brent's wards (December 2024; December 2021 kept for
-      older ward names). Fetched for Brent only (code E09000005).
-    cite_as: 'Ward and boundary: ONS Open Geography Portal, December 2024 boundaries.'
-    licence: not checked (attribution wording to be confirmed before publishing)
-
-  postcodes_io:
-    name: postcodes.io
-    url: https://postcodes.io
-    provides: >
-      centroid where centroid_source = postcodes.io (19): the postcode's centre, used
-      because the Datahub's point was a placeholder in the sea.
-    cite_as: "Location: centre of postcode <postcode>, from postcodes.io (the Datahub's location was a placeholder)."
-    licence: not checked
-
 rules:
   - When asked for a source, name the source of each fact stated, using cite_as.
-  - A count or list from SQL cites the Datahub snapshot date, and adds "N of these were
-    corrected from Brent's planning portal" when any counted row has
-    outcome_source = portal_manual_check or appeal_record_deleted = true.
+  - A count cites the Datahub with the time it was retrieved. Counts use the values the
+    Datahub publishes, so portal corrections are not in them (live_api.yaml,
+    counts_use_published_values).
   - Never say "the Datahub says X" when X came from another source; for corrected
     values say what the Datahub shows and where the correction comes from.
   - Never cite the portal for anything other than what was checked there.

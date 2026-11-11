@@ -24,6 +24,7 @@ all_records:
 
   - id: drop_test_records
     action: drop_records
+    reference_prefix: "55/"   # an unlisted reference with this start is a new test record
     decided: 2026-11-09
     updated: 2026-11-10
     reason: >
@@ -121,7 +122,7 @@ all_records:
       question 5).
     outcomes:
       Brent-23_0650: {status: Approved, decision: Approved, decision_date: 21/04/2023}   # portal: Prior approval required and approved
-      Brent-20_4264: {status: Allowed, appeal_decision: Allowed}   # portal: Appeal decided, Appeal Allowed; no council decision shown (likely non-determination)
+      Brent-20_4264: {status: Allowed, appeal_decision: Allowed}   # portal: Appeal decided, Appeal Allowed; no council decision shown
 
   - id: deleted_appeal
     action: set_when
@@ -247,6 +248,7 @@ derived:
     action: derive
     columns: [legacy_record]
     from: [bo_system]
+    when_equals: {bo_system: FME Legacy Data Import}   # read by clean_record
     decided: 2026-11-10
     rule: legacy_record = true when bo_system is "FME Legacy Data Import", else false.
     reason: >
@@ -291,40 +293,6 @@ derived:
       updated for over a year, and the 3 checked on the portal had moved on
       (approved; appeal allowed; page removed). The bot must not report them as
       pending (open question 5).
-
-  - id: placeholder_centroid
-    action: derive
-    columns: [centroid, centroid_source, placeholder_centroid]
-    from: [centroid.lat, centroid.lon, postcode, site_name]
-    decided: 2026-11-10
-    rule: >
-      A centroid south of latitude 50 is a placeholder (26 records, all at 49.76681,
-      -7.55716: grid origin 0,0 in WGS84, in the sea off Cornwall). Set
-      placeholder_centroid = true and centroid to the postcode's centroid from
-      postcodes.io when the postcode (postcode field, else a full postcode in
-      site_name) is in Brent (19 records), else NULL (7). centroid_source is
-      "datahub" or "postcodes.io". Lookups are cached in
-      data/external/brent/postcode_centroids.json, Brent postcodes only.
-    reason: >
-      A point in the sea would put the record in the wrong place on every map and
-      distance query; its address is in Brent.
-
-  - id: location_check
-    action: derive
-    columns: [location_check, ward_2022]
-    from: [centroid]
-    decided: 2026-11-10
-    rule: >
-      Compare the centroid with the ONS Brent boundary (December 2024, BFC):
-      inside; boundary_edge (outside by at most 20 m; 36 records, nearly all
-      "Street Record" rows on boundary roads: Edgware Road, Harrow Road, Acton Lane,
-      Carlton Vale); no_centroid (placeholder with no Brent postcode); anything else
-      stops the load. ward_2022 = the ONS 2022 ward that contains the centroid
-      (NULL when it is not inside).
-    reason: >
-      Confirms by location that every record is in Brent (golden rule; open question
-      11 and the rest of 10). The boundary follows road centre lines, so sites on
-      those roads land a few metres either side.
 
 not_loaded:
   - field: site_name

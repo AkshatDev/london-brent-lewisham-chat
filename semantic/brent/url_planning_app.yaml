@@ -27,10 +27,12 @@ known_issues:
 
 rules:
   - Give this link when someone wants the documents, plans or decision notice.
-  - No URL on a legacy record is expected (legacy_record); say the record predates
-    the online portal.
+  - No URL on a legacy record is expected (legacy_record); say the link is not
+    recorded for this record.
+  - The 97 non-legacy records without a URL are real gaps, not legacy records; say
+    no link is recorded.
   - The portal is not read by this service (its robots.txt disallows automated
-    access); facts come from the database, the link is for people.
+    access); facts come from the Planning London Datahub, the link is for people.
 
 checked:
   date: 2026-11-10

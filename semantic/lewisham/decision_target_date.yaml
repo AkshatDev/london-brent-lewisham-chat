@@ -1,0 +1,54 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: decision_target_date
+web_label: Decision target date
+meaning: >
+  The date by which the authority aims to decide the application, as recorded. In
+  Lewisham it is recorded for only about a fifth of applications (see
+  partial_coverage).
+schema_definition: Contains the decision target date for the application (DD/MM/YYYY)
+format: date   # the Datahub sends DD/MM/YYYY text; cleaning reads it as a date
+
+checks_passed:
+  - All 5,139 filled values (after cleaning) are valid DD/MM/YYYY dates (no blanks, no other
+    characters), from 26/04/2018 to 29/01/2027.
+  - No placeholder dates (the most common date is used 26 times).
+
+known_issues:
+  - id: partial_coverage
+    count: 22626
+    description: >
+      81.5% of records (after cleaning) have no target date. Only CSV Data Import records have one, and
+      only from 2019 on (year of valid_date); legacy and Portal records never do. Even
+      from 2019 on, only 22% have one (12-43% a month up to August 2026), across every
+      application type, decision and status. Why some records have one is not known.
+
+  - id: leans_to_approvals
+    description: >
+      Among records from 2019 on, approvals have a target date about twice as often
+      as refusals (Approved 26%, Refused 12%; Prior Approval 6%, Householder 27%).
+      The records with a target date are not a fair sample of applications.
+
+  - id: recent_months_low
+    description: >
+      Applications valid in September-November 2026 rarely have one yet (9%, 2%, 0%).
+      Whether it is added later is not checked.
+
+  - id: stale_pending_not_findable
+    description: >
+      Brent finds out-of-date pending applications from their target date. In Lewisham
+      only 113 of the 481 pending applications (Application Under Consideration) have
+      one, so that check cannot cover most of them.
+
+rules:
+  - '"How many were decided on time?" and other counts using the target date: do not
+    answer for Lewisham. Say the target date is recorded for only about a fifth of
+    applications from 2019 on, and not evenly (more often for approvals).'
+  - For a single application with a target date, give it, and compare it with
+    decision_date when both exist.
+  - For an application without one, say no target date is recorded; never work it out
+    from valid_date.
+  - A target date in the future is normal for applications not decided yet.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/decision_target_date.ipynb, Steps 1-6)

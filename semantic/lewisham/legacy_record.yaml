@@ -1,0 +1,33 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: legacy_record
+web_label: null   # derived from bo_system (derived rule legacy_record in cleaning.yaml)
+meaning: >
+  True for records that came into the Datahub through the legacy import
+  (bo_system = FME Legacy Data Import). Only that value counts: records with bo_system
+  Portal or CSV Data Import are not legacy.
+format: boolean
+
+checks_passed:
+  - 4,312 legacy records after cleaning; none has a valid_date, decision_target_date or
+    url_planning_app.
+  - The 33 records with bo_system Portal are ordinary applications, not legacy
+    (findings/lewisham/bo_system.ipynb).
+
+known_issues:
+  - id: older_applications
+    description: >
+      Legacy records are the older part of Lewisham's history: before 2019 there are
+      4,298 decisions in all, about as many as the legacy records (decision_date.yaml,
+      thin_before_2019). Some have no decision recorded (38 Superseded or Lapsed;
+      decision.yaml, legacy_decision_missing) or the placeholder description "No
+      description provided by LDMS" (195; description.yaml).
+
+rules:
+  - A legacy record has no valid date, target date or planning portal link. Say so
+    ("not recorded for this record"); don't call it a gap or pending.
+  - Questions that need valid_date or decision_target_date (decision times, trends by
+    valid date) can't include legacy records.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/valid_date.ipynb, decision_target_date.ipynb, url_planning_app.ipynb, bo_system.ipynb)

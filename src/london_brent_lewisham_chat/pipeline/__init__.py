@@ -1,5 +1,6 @@
-"""Data pipeline: download a borough's applications, clean them, load them into PostGIS.
+"""Data pipeline: download a borough's raw snapshot and clean records.
 
-Layers (PLAN.md §11): dated raw snapshot (JSONL.gz, local only) → ``raw`` schema
-(documents as JSONB) → ``core`` schema (typed, cleaned by ``cleaning.yaml``).
+``extract`` writes a dated raw snapshot (JSONL.gz, local only) for the EDA notebooks.
+``clean`` turns one raw record into a cleaned one with the borough's
+``cleaning.yaml``; the chat tools use it on every live record they return.
 """

@@ -1,0 +1,28 @@
+# Field facts for the chat bot, Lewisham only (golden rule). Describes the data after cleaning.yaml.
+field: appeal_decision_date
+web_label: Appeal decision date
+meaning: >
+  Date of the appeal decision (see appeal_decision). Not the council's decision date:
+  see decision_date.
+schema_definition: Contains the appeal decision date for the application (DD/MM/YYYY)
+format: date   # the Datahub sends DD/MM/YYYY text; cleaning reads it as a date
+
+checks_passed:
+  - All 748 filled values are valid DD/MM/YYYY dates (no blanks, no other characters),
+    from 1987-01-27 to 2026-11-05; none in the future.
+  - Always filled together with appeal_decision.
+  - No placeholder dates (the most common date is used 9 times).
+
+known_issues:
+  - id: early_coverage
+    description: >
+      Mostly from 2019 on (42-115 a year); 115 in all for 1987-2018 (0-11 a year), so
+      counts for earlier years are incomplete.
+
+rules:
+  - '"When was the appeal decided?" uses appeal_decision_date.'
+  - Trends by year are reliable from 2019 on only.
+
+checked:
+  date: 2026-11-11
+  source: live API (findings/lewisham/appeal_decision.ipynb, Steps 1-3)

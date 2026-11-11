@@ -1,0 +1,32 @@
+# Field facts for the chat bot, Brent only (golden rule). Describes the live data after cleaning.yaml.
+# A derived column: set on each live record by cleaning (outcome_from_portal and
+# stale_outcome_from_portal in cleaning.yaml). Moved here from record_flags.yaml.
+field: outcome_source
+web_label: null   # derived; not on the website
+meaning: >
+  Where the record's outcome (status, decision, dates) comes from: as the Planning
+  London Datahub gives it, or from a person's check of Brent's planning portal.
+format: text
+
+values:
+  - datahub
+  - portal_manual_check
+
+checks_passed:
+  - On the 2026-11-10 snapshot, 36,520 records are datahub and 11 are
+    portal_manual_check (9 with no status or decision in the Datahub, 2 stale pending
+    records).
+
+rules:
+  - datahub means the outcome is as the Datahub gives it.
+  - portal_manual_check means a person read the outcome on Brent's planning portal on
+    2026-11-10, because the Datahub had none or an out-of-date one.
+  - Count portal_manual_check outcomes like any other outcome; cite the portal check
+    (sources.yaml).
+  - When the answer depends on an outcome from the portal check, say so.
+
+checked:
+  date: 2026-11-11
+  source: >
+    record_flags.yaml (2026-11-10, cleaned database snapshot); cleaning.yaml rules
+    outcome_from_portal and stale_outcome_from_portal

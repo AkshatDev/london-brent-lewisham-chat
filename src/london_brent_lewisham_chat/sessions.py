@@ -28,6 +28,9 @@ class Session:
     """Each turn's items, oldest first; a turn is kept or dropped whole, so a tool
     call never loses its result."""
     citations_issued: int = 0
+    citations: dict[str, Any] = field(default_factory=dict)
+    """Every citation issued in the session, by id (``c1``, ...), so a later answer
+    that repeats an earlier fact can show the source its marker points to."""
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     """Held while a question is answered, so two requests in one session can't
     interleave their history."""
@@ -49,6 +52,14 @@ class Session:
         """
         self.turns.append(items)
         del self.turns[:-max_turns]
+
+    def remember_citations(self, citations: list[Any]) -> None:
+        """Keep a finished turn's citations, by id.
+
+        Args:
+            citations: The turn's citations (each has an ``id``).
+        """
+        self.citations |= {c.id: c for c in citations}
 
     def next_citation_id(self) -> str:
         """Return the next citation id: ``c1``, ``c2``, ... across the session.

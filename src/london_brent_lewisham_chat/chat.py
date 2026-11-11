@@ -28,6 +28,7 @@ from .sessions import Item, Session
 from .tools import (
     COUNT_DESCRIPTION,
     DETAILS_DESCRIPTION,
+    SEARCH_DESCRIPTION,
     Area,
     Citation,
     DetailsArgs,
@@ -35,6 +36,8 @@ from .tools import (
     count_args_model,
     count_in,
     details_in,
+    search_args_model,
+    search_in,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +146,12 @@ def build_tools(layers: Sequence[SemanticLayer]) -> dict[str, Tool]:
             description=COUNT_DESCRIPTION,
             args_model=count_args_model(layers),
             run=count_in,
+        ),
+        Tool(
+            name="search_applications",
+            description=SEARCH_DESCRIPTION,
+            args_model=search_args_model(layers),
+            run=search_in,
         ),
         Tool(
             name="get_application_details",

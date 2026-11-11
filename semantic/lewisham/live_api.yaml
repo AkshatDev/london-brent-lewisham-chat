@@ -92,6 +92,13 @@ live_rules:
       The bot does not cover wards: the published ward has not been checked, so it is
       not requested. Do not answer "in ward X" questions; say the bot does not cover
       wards yet.
+  - id: address_search_no_match
+    rule: >
+      Nothing matched the published address text. Only about 81% of addresses include
+      a full postcode; the rest have only the postcode district, a description of the
+      site or no address (address.yaml, no_full_postcode). So this does not show that
+      there are no applications at that address: say so, and suggest searching by
+      street name or postcode district instead.
 
 # Default filters for answers, applied by the tools. No flags to exclude: Lewisham's
 # data has no decisions recorded before they are issued, and no stale-status rule yet.
@@ -110,7 +117,7 @@ default_filters:
     filter_on: appeal_decision
   - id: year
     applies_to: '"in <year>"'
-    date_field: {decisions: decision_date, submissions: valid_date}
+    date_field: {decisions: decision_date, submissions: valid_date, appeals: appeal_decision_date}
     rule: >
       Say which date is used. valid_date is recorded from 2019 on only, so counts by
       valid_date cover 2019 on; Lewisham's records before 2019 are far from complete

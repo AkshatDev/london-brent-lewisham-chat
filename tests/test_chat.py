@@ -296,6 +296,7 @@ def test_every_request_stores_nothing_at_openai_and_carries_prompt_and_tools(
         assert body["instructions"] == build_instructions([brent])
         assert [t["name"] for t in body["tools"]] == [
             "count_applications",
+            "search_applications",
             "get_application_details",
         ]
         assert body["max_output_tokens"] == 1000

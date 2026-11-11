@@ -28,6 +28,8 @@ from london_brent_lewisham_chat.tools import (
     count_in,
     details_in,
     get_application_details,
+    search_args_model,
+    search_in,
 )
 
 SEMANTIC = Path(__file__).parents[1] / "semantic"
@@ -532,3 +534,272 @@ def test_details_searches_every_borough_when_none_is_named(
 
     assert out.result["found"] is True
     assert (len(brent_requests), len(lewisham_requests)) == (1, 1)
+
+
+# --- More count filters: month, type, appeals, pending --------------------------------
+
+
+def run_count(args: BaseModel, layer: SemanticLayer) -> tuple[Any, list[httpx.Request]]:
+    datahub, requests = fake_datahub(httpx.Response(200, json={"count": 7}))
+    out = asyncio.run(
+        count_in(args, areas={layer.borough: Area(layer, datahub)}, citation_id="c1")
+    )
+    return out, requests
+
+
+@pytest.mark.parametrize(
+    ("year", "month", "gte", "lt"),
+    [(2026, 3, "01/03/2026", "01/04/2026"), (2025, 12, "01/12/2025", "01/01/2026")],
+)
+def test_a_month_narrows_the_year_range_on_the_chosen_date(
+    brent: SemanticLayer,
+    args_model: type[BaseModel],
+    year: int,
+    month: int,
+    gte: str,
+    lt: str,
+) -> None:
+    args = args_model(
+        local_authority="Brent", year=year, month=month, date_basis="decided"
+    )
+
+    assert count_filters(args, brent)[1] == {
+        "range": {"decision_date": {"gte": gte, "lt": lt}}
+    }
+
+
+def test_application_type_and_appeal_outcome_are_phrase_matches_on_the_appeal_date(
+    lewisham_layer: SemanticLayer,
+) -> None:
+    model = count_args_model(lewisham_layer)
+    args = model(
+        local_authority="Lewisham",
+        year=2025,
+        application_type="Householder",
+        appeal_decision="Allowed",
+        date_basis="appeal_decided",
+    )
+
+    out, [request] = run_count(args, lewisham_layer)
+
+    sent = json.loads(request.content)["query"]["bool"]["filter"]
+    assert sent[2] == {
+        "range": {"appeal_decision_date": {"gte": "01/01/2025", "lt": "01/01/2026"}}
+    }
+    assert {"match_phrase": {"application_type": "Householder"}} in sent
+    assert {"match_phrase": {"appeal_decision": "Allowed"}} in sent
+    assert out.result["counted"] == (
+        "Lewisham Householder applications appeal decided in 2025 "
+        "(appeal_decision_date) with appeal decision Allowed"
+    )
+
+
+def test_pending_needs_no_year_and_leaves_out_stale_and_not_issued_records(
+    brent: SemanticLayer, args_model: type[BaseModel]
+) -> None:
+    args = args_model(local_authority="Brent", pending=True)
+
+    out, [request] = run_count(args, brent)
+
+    sent = json.loads(request.content)["query"]["bool"]["filter"]
+    assert not any("range" in clause for clause in sent)  # no year
+    pending = sent[-1]["bool"]
+    statuses = pending["filter"][0]["bool"]["should"]
+    assert statuses == [
+        {"match_phrase": {"status": "Application Received"}},
+        {"match_phrase": {"status": "Application Under Consideration"}},
+    ]
+    stale, not_issued = pending["must_not"]
+    by_id, by_date = stale["bool"]["should"]
+    assert by_id == {"terms": {"id": ["Brent-96_1985"]}}
+    [cutoff] = by_date["bool"]["filter"][1]["range"]["decision_target_date"].values()
+    expected = date.fromordinal(date.today().toordinal() - 365)
+    assert cutoff == f"{expected:%d/%m/%Y}"
+    assert not_issued["bool"]["must_not"] == [{"exists": {"field": "decision_date"}}]
+    assert out.result["counted"] == (
+        "Brent applications still awaiting a decision, excluding records whose "
+        "pending status is out of date"
+    )
+
+
+def test_a_lewisham_pending_count_says_it_may_include_stale_records(
+    lewisham_layer: SemanticLayer,
+) -> None:
+    args = count_args_model(lewisham_layer)(local_authority="Lewisham", pending=True)
+
+    out, _ = run_count(args, lewisham_layer)
+
+    [rule] = [
+        r.rule for r in lewisham_layer.live.live_rules if r.id == "pending_may_be_stale"
+    ]
+    assert " ".join(rule.split()) in out.result["notes"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        ({}, "year is required"),
+        ({"pending": True, "month": 3}, "month needs a year"),
+        ({"pending": True, "decision": "Refused"}, "pending applications have no"),
+        ({"year": 2025, "appeal_decision": "Allowed"}, "date_basis='appeal_decided'"),
+        ({"year": 2025, "date_basis": "appeal_decided"}, "date_basis='appeal_decided'"),
+    ],
+    ids=[
+        "no-year",
+        "month-no-year",
+        "pending-and-decision",
+        "appeal-no-basis",
+        "basis-no-appeal",
+    ],
+)
+def test_counts_that_mean_nothing_go_back_as_errors_without_a_request(
+    brent: SemanticLayer,
+    args_model: type[BaseModel],
+    kwargs: dict[str, Any],
+    error: str,
+) -> None:
+    out, requests = run_count(args_model(local_authority="Brent", **kwargs), brent)
+
+    assert error in out.result["error"]
+    assert requests == []
+
+
+def test_a_month_outside_1_to_12_is_rejected(args_model: type[BaseModel]) -> None:
+    with pytest.raises(ValidationError):
+        args_model(local_authority="Brent", year=2026, month=13)
+
+
+# --- search_applications -------------------------------------------------------------
+
+
+def brent_hit(**fields: object) -> dict[str, Any]:
+    return {
+        "_source": {
+            "id": "Brent-24_0001",
+            "borough": "Brent",
+            "lpa_name": "Brent",
+            "lpa_app_no": "24/0001",
+            "status": "Refused",
+            "decision": "Refused",
+            "application_type": "Householder",
+            "description": "Basement extension " + "x" * 400,
+            "valid_date": "02/01/2024",
+            "decision_date": "01/03/2024",
+            "street_name": "Church Road",
+            **fields,
+        }
+    }
+
+
+def run_search(
+    brent: SemanticLayer, hits: list[dict[str, Any]], **kwargs: object
+) -> tuple[Any, list[httpx.Request]]:
+    datahub, requests = fake_datahub(
+        httpx.Response(200, json={"hits": {"total": {"value": 42}, "hits": hits}})
+    )
+    args = search_args_model(brent)(local_authority="Brent", **kwargs)
+    out = asyncio.run(
+        search_in(args, areas={"brent": Area(brent, datahub)}, citation_id="c1")
+    )
+    return out, requests
+
+
+def test_a_search_uses_the_count_filters_then_the_text_newest_first(
+    brent: SemanticLayer,
+) -> None:
+    _, [request] = run_search(
+        brent,
+        [],
+        decision="Refused",
+        date_basis="decided",
+        description_words="basement",
+        address_text="Church Road",
+        limit=3,
+    )
+
+    body = json.loads(request.content)
+    count_args = count_args_model(brent)(
+        local_authority="Brent", decision="Refused", date_basis="decided"
+    )
+    assert body["query"]["bool"]["filter"] == [
+        scope_filter("brent"),
+        *count_filters(count_args, brent),
+        {"match": {"description": {"query": "basement", "operator": "and"}}},
+        {
+            "multi_match": {
+                "query": "Church Road",
+                "type": "phrase",
+                "fields": [
+                    "site_name",
+                    "site_number",
+                    "street_name",
+                    "locality",
+                    "postcode",
+                ],
+            }
+        },
+    ]
+    assert body["sort"] == [{"decision_date": {"order": "desc", "missing": "_last"}}]
+    assert body["size"] == 3
+
+
+def test_a_search_returns_short_cleaned_summaries_and_one_citation(
+    brent: SemanticLayer,
+) -> None:
+    out, _ = run_search(brent, [brent_hit()], year=2024)
+
+    assert (out.result["total"], out.result["shown"]) == (42, 1)
+    [app] = out.result["applications"]
+    assert app["lpa_app_no"] == "24/0001"
+    assert app["valid_date"] == "2024-01-02"  # cleaned: parsed, then plain text
+    assert len(app["description"]) == 200
+    assert "id" not in app  # details only; the citation covers the search
+    [citation] = out.citations
+    assert out.result["citation"] == citation.id == "c1"
+    assert citation.text.startswith(
+        "Planning London Datahub API (live): Brent applications validated in 2024"
+    )
+    assert "newest first by valid_date" in citation.text
+
+
+def test_a_search_needs_no_year_but_rejects_counts_that_mean_nothing(
+    brent: SemanticLayer,
+) -> None:
+    out, [request] = run_search(brent, [])
+    assert "range" not in json.dumps(json.loads(request.content)["query"])
+    assert out.result["total"] == 42
+
+    out, requests = run_search(brent, [], month=3)
+    assert out.result == {"error": "month needs a year"}
+    assert requests == []
+
+
+def test_a_search_lists_at_most_ten(brent: SemanticLayer) -> None:
+    with pytest.raises(ValidationError):
+        search_args_model(brent)(local_authority="Brent", limit=11)
+
+
+@pytest.mark.parametrize("borough", ["brent", "lewisham"])
+def test_an_address_with_no_match_says_that_proves_nothing(borough: str) -> None:
+    layer = load_semantic(borough, SEMANTIC)
+    datahub, _ = fake_datahub(
+        httpx.Response(200, json={"hits": {"total": {"value": 0}, "hits": []}})
+    )
+    args = search_args_model(layer)(
+        local_authority=layer.borough.title(), address_text="NW10 9EG"
+    )
+
+    out = asyncio.run(
+        search_in(args, areas={borough: Area(layer, datahub)}, citation_id="c1")
+    )
+
+    [rule] = [
+        r.rule for r in layer.live.live_rules if r.id == "address_search_no_match"
+    ]
+    assert " ".join(rule.split()) in out.result["notes"]
+
+
+def test_an_address_with_matches_carries_no_such_note(brent: SemanticLayer) -> None:
+    out, _ = run_search(brent, [brent_hit()], address_text="Church Road")
+
+    assert not any("published address text" in n for n in out.result["notes"])

@@ -6,7 +6,8 @@ Query *parameters* (dropped ids, statuses, date fields) come from the YAMLs; the
 small amount of *logic* that turns a rule into a query lives here, and is checked
 against the cleaned database's counts.
 
-Two tools so far: ``count_applications`` and ``get_application_details``.
+Three tools: ``count_applications``, ``search_applications`` and
+``get_application_details``.
 """
 
 import asyncio
@@ -38,18 +39,27 @@ FIRST_YEAR = 1987
 """The earliest year with applications (validated from 1987-04-23 on,
 Brent's EDA, ``findings/brent/valid_date.ipynb``)."""
 
-DATE_BASIS_KEY = {"validated": "submissions", "decided": "decisions"}
+DATE_BASIS_KEY = {
+    "validated": "submissions",
+    "decided": "decisions",
+    "appeal_decided": "appeals",
+}
 """``date_basis`` argument -> key of ``date_field`` in the ``year`` default filter."""
 
 COUNT_DESCRIPTION = (
-    "Count planning applications in one local authority for one year, optionally "
-    "with one council decision. Choose date_basis by what the year refers to "
+    "Count planning applications in one local authority for one year (or one month "
+    "of it), optionally narrowed by council decision, application type and appeal "
+    "outcome. Choose date_basis by what the year refers to "
     "(the 'year' default filter: decision_date for decisions, valid_date for "
-    "submissions): "
+    "submissions, appeal_decision_date for appeals): "
     "'decided' when the year is when a decision was made, e.g. 'approved in 2023', "
     "'refused in 2024', 'decided in 2025'; "
     "'validated' when it is when applications came in, e.g. 'validated in 2024', "
-    "'submitted in 2024', 'applications in 2024'. "
+    "'submitted in 2024', 'applications in 2024'; "
+    "'appeal_decided' when it is when an appeal was decided, e.g. 'appeals allowed "
+    "in 2025'. "
+    "pending=true counts applications still awaiting a decision now; no year is "
+    "needed for that. "
     "For a follow-up about earlier results ('how many of those were refused?'), "
     "keep the date_basis and year of the count it refers to. To compare boroughs, "
     "count each one with its own call. "
@@ -63,6 +73,38 @@ DETAILS_DESCRIPTION = (
     "to the council's planning portal) and notes on known data issues for this "
     "record. found=false means no such application in the covered area."
 )
+
+SEARCH_DESCRIPTION = (
+    "List up to 10 planning applications in one local authority, newest first, with "
+    "the same filters as count_applications (year optional here), plus words in "
+    "the description (e.g. 'basement', 'loft conversion') and a street, place or "
+    "postcode in the address (e.g. 'Church Road', 'SE13 6LG'). The newest are by "
+    "the date_basis date: 'decided' for 'recent refusals/decisions', 'validated' "
+    "for 'recent applications'. Returns the total number of matches and a short "
+    "summary of each; use get_application_details for one application's full "
+    "details."
+)
+
+SEARCH_FIELDS = (
+    "lpa_app_no",
+    "application_type",
+    "description",
+    "address",
+    "status",
+    "decision",
+    "valid_date",
+    "decision_date",
+    "appeal_decision",
+    "url_planning_app",
+)
+"""Fields of each listed application: enough to tell them apart and to follow up
+(a subset of ``returned`` in ``live_api.yaml``; the details tool gives the rest)."""
+
+SEARCH_DESCRIPTION_CHARS = 200
+"""Description length per listed application: the gist, so ten stay small."""
+
+ADDRESS_FIELDS = ("site_name", "site_number", "street_name", "locality", "postcode")
+"""The published address parts (``address.yaml``); an address search matches any."""
 
 DESCRIPTION_MAX_CHARS = 1000
 """Longest description passed to the model; a few are very long, and the model
@@ -102,9 +144,10 @@ class _Args(BaseModel):
 def count_args_model(semantic: SemanticLayer | Sequence[SemanticLayer]) -> type[_Args]:
     """Build the argument model of ``count_applications`` from the semantic layers.
 
-    The authorities are the layers' boroughs and the allowed decisions the union of
-    their ``decision.yaml`` values (in file order), so nothing is typed by hand. A
-    decision one borough doesn't use is rejected per call (``count_in``).
+    The authorities are the layers' boroughs; the allowed decisions, application
+    types and appeal outcomes the union of their YAML values (in file order), so
+    nothing is typed by hand. A value one borough doesn't use, or a combination
+    that makes no sense, is rejected per call (``count_in``).
 
     Args:
         semantic: One borough's semantic layer, or several.
@@ -114,12 +157,14 @@ def count_args_model(semantic: SemanticLayer | Sequence[SemanticLayer]) -> type[
     """
     layers = [semantic] if isinstance(semantic, SemanticLayer) else list(semantic)
     authorities = tuple(BOROUGH_NAMES[layer.borough] for layer in layers)
-    decisions = tuple(
-        dict.fromkeys(v for layer in layers for v in layer.allowed_values("decision"))
-    )
 
-    def check_year(cls: type, value: int) -> int:
-        if not FIRST_YEAR <= value <= date.today().year:
+    def values(field: str) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(v for layer in layers for v in layer.allowed_values(field))
+        )
+
+    def check_year(cls: type, value: int | None) -> int | None:
+        if value is not None and not FIRST_YEAR <= value <= date.today().year:
             raise ValueError(f"year must be between {FIRST_YEAR} and this year")
         return value
 
@@ -131,24 +176,96 @@ def count_args_model(semantic: SemanticLayer | Sequence[SemanticLayer]) -> type[
             Literal[*authorities],
             Field(description="The local authority. Only these are covered."),
         ),
-        year=(int, Field(description="Calendar year, e.g. 2024.")),
+        year=(
+            int | None,
+            Field(
+                default=None,
+                description="Calendar year, e.g. 2024. Required unless pending=true.",
+            ),
+        ),
+        month=(
+            int | None,
+            Field(
+                default=None,
+                ge=1,
+                le=12,
+                description="Month of that year (1-12), e.g. 3 for 'in March 2026'.",
+            ),
+        ),
         decision=(
-            Literal[*decisions] | None,
+            Literal[*values("decision")] | None,
             Field(default=None, description="Council decision to count, if any."),
         ),
+        application_type=(
+            Literal[*values("application_type")] | None,
+            Field(default=None, description="Application type to count, if any."),
+        ),
+        appeal_decision=(
+            Literal[*values("appeal_decision")] | None,
+            Field(
+                default=None,
+                description="Appeal outcome to count, if any (use with "
+                "date_basis='appeal_decided' for 'appeals allowed in <year>').",
+            ),
+        ),
+        pending=(
+            bool,
+            Field(
+                default=False,
+                description="Only applications still awaiting a decision now.",
+            ),
+        ),
         date_basis=(
-            Literal["validated", "decided"],
+            Literal[*DATE_BASIS_KEY],
             Field(
                 default="validated",
                 description=(
                     "Which date the year applies to: 'decided' (decision_date) for "
                     "when a decision was made ('approved/refused/decided in'); "
-                    "'validated' (valid_date) for when applications came in. A "
-                    "follow-up keeps the basis of the count it refers to."
+                    "'validated' (valid_date) for when applications came in; "
+                    "'appeal_decided' (appeal_decision_date) for when an appeal was "
+                    "decided. A follow-up keeps the basis of the count it refers to."
                 ),
             ),
         ),
     )
+
+
+def count_problem(
+    args: _Args, semantic: SemanticLayer, *, need_year: bool = True
+) -> str | None:
+    """Say what is wrong with a count's arguments for this borough, if anything.
+
+    Returned to the model as an error, so it can correct the call instead of
+    getting a count that means something else.
+
+    Args:
+        args: Validated ``count_applications`` (or ``search_applications``)
+            arguments.
+        semantic: The borough's semantic layer.
+        need_year: Whether a year is required (counts); a search lists the newest
+            without one.
+
+    Returns:
+        The problem in one sentence, or ``None`` when the call is fine.
+    """
+    name = BOROUGH_NAMES[semantic.borough]
+    for field in ("decision", "application_type", "appeal_decision"):
+        value = getattr(args, field)
+        if value is not None and value not in semantic.allowed_values(field):
+            return f"{value!r} is not a {field} {name} uses"
+    if need_year and args.year is None and not args.pending:
+        return "year is required (only pending=true counts can leave it out)"
+    if args.month is not None and args.year is None:
+        return "month needs a year"
+    if args.pending and args.decision is not None:
+        return "pending applications have no council decision yet: drop one of them"
+    if (args.date_basis == "appeal_decided") != (args.appeal_decision is not None):
+        return (
+            "use date_basis='appeal_decided' together with appeal_decision, and "
+            "only then"
+        )
+    return None
 
 
 def count_filters(args: _Args, semantic: SemanticLayer) -> list[dict[str, Any]]:
@@ -157,37 +274,82 @@ def count_filters(args: _Args, semantic: SemanticLayer) -> list[dict[str, Any]]:
     The scope filter is added by the Datahub client; these come after it.
 
     Args:
-        args: Validated ``count_applications`` arguments.
+        args: Validated ``count_applications`` arguments (``count_problem`` found
+            nothing wrong).
         semantic: The borough's semantic layer.
 
     Returns:
-        The exclusion of dropped records, the year range on the chosen date field,
-        and (with a decision) the decision with the ``decided`` default filter.
+        The exclusion of dropped records; the year (or month) range on the chosen
+        date field; then one clause per filter asked for: council decision (with
+        the ``decided`` default filter), pending (the ``pending`` default filter),
+        application type, appeal outcome.
     """
-    year_filter = _default_filter(semantic, "year")
-    field = year_filter.date_field[DATE_BASIS_KEY[args.date_basis]]
-    filters = [
-        _excluded_records(semantic),
-        {
-            "range": {
-                field: {"gte": f"01/01/{args.year}", "lt": f"01/01/{args.year + 1}"}
-            }
-        },
-    ]
+    filters = [_excluded_records(semantic)]
+    if args.year is not None:
+        field = _default_filter(semantic, "year").date_field[
+            DATE_BASIS_KEY[args.date_basis]
+        ]
+        filters.append({"range": {field: _date_range(args.year, args.month)}})
     if args.decision is not None:
-        decided = _default_filter(semantic, "decided")
+        filters.append(_default_clause(semantic, "decided", [args.decision]))
+    if args.pending:
+        pending = _default_filter(semantic, "pending")
+        filters.append(_default_clause(semantic, "pending", pending.status_in))
+    if args.application_type is not None:
+        filters.append(_is("application_type", args.application_type))
+    if args.appeal_decision is not None:
+        # A real outcome never matches the deleted appeals' "ZZZ", so the appeals
+        # filter's exclude_rules (deleted_appeal) hold without another clause.
+        appeals = _default_filter(semantic, "appeals")
         filters.append(
-            {
-                "bool": {
-                    "filter": [_is(decided.filter_on or "decision", args.decision)],
-                    "must_not": [
-                        _flag_condition(flag, semantic)
-                        for flag in decided.exclude_flags
-                    ],
-                }
-            }
+            _is(appeals.filter_on or "appeal_decision", args.appeal_decision)
         )
     return filters
+
+
+def _date_range(year: int, month: int | None) -> dict[str, str]:
+    """Build the ``gte``/``lt`` range of one year or one month, in the Datahub format.
+
+    Args:
+        year: The calendar year.
+        month: A month of it, or ``None`` for the whole year.
+
+    Returns:
+        E.g. ``{"gte": "01/03/2026", "lt": "01/04/2026"}``.
+    """
+    if month is None:
+        start, end = date(year, 1, 1), date(year + 1, 1, 1)
+    else:
+        start = date(year, month, 1)
+        end = date(year + month // 12, month % 12 + 1, 1)
+    return {"gte": f"{start:%d/%m/%Y}", "lt": f"{end:%d/%m/%Y}"}
+
+
+def _default_clause(
+    semantic: SemanticLayer, filter_id: str, values: list[str]
+) -> dict[str, Any]:
+    """Match one of ``values`` on a default filter's field, without its flags.
+
+    Args:
+        semantic: The borough's semantic layer.
+        filter_id: ``decided`` or ``pending`` (``live_api.yaml``).
+        values: The values to match, e.g. ``["Refused"]`` or the pending statuses.
+
+    Returns:
+        A ``bool`` clause: one of the values, and none of the excluded flags.
+    """
+    default = _default_filter(semantic, filter_id)
+    field = default.filter_on or "decision"
+    return {
+        "bool": {
+            "filter": [
+                _is(field, values[0]) if len(values) == 1 else _any_of(field, values)
+            ],
+            "must_not": [
+                _flag_condition(flag, semantic) for flag in default.exclude_flags
+            ],
+        }
+    }
 
 
 async def count_applications(
@@ -225,6 +387,151 @@ async def count_applications(
         "count": found.count,
         "counted": counted,
         "notes": _notes(args, semantic),
+        "citation": citation_id,
+    }
+    return ToolOutput(
+        result=result, citations=[citation], datahub_cache_hits=int(found.cached)
+    )
+
+
+def search_args_model(
+    semantic: SemanticLayer | Sequence[SemanticLayer],
+) -> type[_Args]:
+    """Build the argument model of ``search_applications``: the count's, plus text.
+
+    Args:
+        semantic: One borough's semantic layer, or several.
+
+    Returns:
+        A Pydantic model whose JSON schema is what the model sees.
+    """
+    text = Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=100)
+    ]
+    return create_model(
+        "SearchApplicationsArgs",
+        __base__=count_args_model(semantic),
+        description_words=(
+            text | None,
+            Field(
+                default=None,
+                description="Words that must all appear in the description, "
+                "e.g. 'basement'.",
+            ),
+        ),
+        address_text=(
+            text | None,
+            Field(
+                default=None,
+                description="A street, place or postcode in the address, matched as "
+                "a phrase, e.g. 'Church Road'.",
+            ),
+        ),
+        limit=(
+            int,
+            Field(default=5, ge=1, le=10, description="How many to list (1-10)."),
+        ),
+    )
+
+
+async def search_applications(
+    args: _Args,
+    *,
+    semantic: SemanticLayer,
+    datahub: DatahubClient,
+    citation_id: str,
+    today: date | None = None,
+) -> ToolOutput:
+    """List the newest matching applications on the live Datahub, cleaned.
+
+    The filters are the count's (``count_filters``), so a list and a count with the
+    same arguments agree; the text clauses come after them. Records are cleaned
+    one by one, as for the details tool, and summarised to ``SEARCH_FIELDS``.
+
+    Args:
+        args: Validated ``search_applications`` arguments.
+        semantic: The borough's semantic layer.
+        datahub: The live Datahub client (scoped and cached).
+        citation_id: The id this call's citation gets.
+        today: The date ``status_stale`` is measured from; tests pass a fixed one.
+
+    Returns:
+        ``{"total", "shown", "applications", "searched", "notes", "citation"}`` for
+        the model, and one citation for the search.
+
+    Raises:
+        DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
+    """
+    field = _default_filter(semantic, "year").date_field[
+        DATE_BASIS_KEY[args.date_basis]
+    ]
+    filters = count_filters(args, semantic)
+    if args.description_words:
+        filters.append(
+            {
+                "match": {
+                    "description": {"query": args.description_words, "operator": "and"}
+                }
+            }
+        )
+    if args.address_text:
+        filters.append(
+            {
+                "multi_match": {
+                    "query": args.address_text,
+                    "type": "phrase",
+                    "fields": list(ADDRESS_FIELDS),
+                }
+            }
+        )
+    with logfire.span("tool search_applications", args=args.model_dump()) as span:
+        found = await datahub.search(
+            *filters,
+            size=args.limit,
+            sort=[{field: {"order": "desc", "missing": "_last"}}],
+            fields=semantic.live.request_fields,
+        )
+        rows = [
+            row
+            for record in found.records
+            if (row := _cleaned(record, semantic, today or date.today())) is not None
+        ]
+        span.set_attributes({"total": found.total, "shown": len(rows)})
+
+    returned = {ref.field for ref in semantic.live.returned}
+    applications = []
+    for row in rows:
+        summary = {f: _plain(row.get(f)) for f in SEARCH_FIELDS if f in returned}
+        if isinstance(summary.get("description"), str):
+            summary["description"] = summary["description"][:SEARCH_DESCRIPTION_CHARS]
+        applications.append(summary)
+
+    searched = _describe(args, semantic)
+    if args.description_words:
+        searched += f', with "{args.description_words}" in the description'
+    if args.address_text:
+        searched += f', with "{args.address_text}" in the address'
+    searched += f", newest first by {field}"
+    citation = Citation(
+        id=citation_id,
+        text=_cite(semantic, searched, found.retrieved_at),
+        query=found.query,
+        retrieved_at=found.retrieved_at,
+    )
+    notes = _notes(args, semantic)
+    if args.address_text and found.total == 0:
+        # Addresses are published unevenly: no match is not proof of no applications.
+        notes += [
+            " ".join(rule.rule.split())
+            for rule in semantic.live.live_rules
+            if rule.id == "address_search_no_match"
+        ]
+    result = {
+        "total": found.total,
+        "shown": len(applications),
+        "applications": applications,
+        "searched": searched,
+        "notes": notes,
         "citation": citation_id,
     }
     return ToolOutput(
@@ -357,19 +664,41 @@ async def count_in(
         citation_id: The id this call's citation gets.
 
     Returns:
-        The count, or an error the model can correct (a decision value the borough
-        doesn't use).
+        The count, or an error the model can correct (``count_problem``: e.g. a
+        decision the borough doesn't use, or a month without a year).
 
     Raises:
         DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
     """
     area = areas[args.local_authority.lower()]
-    if args.decision is not None and args.decision not in area.semantic.allowed_values(
-        "decision"
-    ):
-        error = f"{args.decision!r} is not a decision {args.local_authority} uses"
+    if (error := count_problem(args, area.semantic)) is not None:
         return ToolOutput(result={"error": error}, citations=[])
     return await count_applications(
+        args, semantic=area.semantic, datahub=area.datahub, citation_id=citation_id
+    )
+
+
+async def search_in(
+    args: _Args, *, areas: Mapping[str, Area], citation_id: str
+) -> ToolOutput:
+    """Search in the borough the model named, with that borough's rules.
+
+    Args:
+        args: Validated ``search_applications`` arguments.
+        areas: The covered boroughs, by borough key.
+        citation_id: The id this call's citation gets.
+
+    Returns:
+        The list, or an error the model can correct (``count_problem``, except
+        that a year is optional).
+
+    Raises:
+        DatahubError: If the Datahub can't answer (the endpoint answers 503/504).
+    """
+    area = areas[args.local_authority.lower()]
+    if (error := count_problem(args, area.semantic, need_year=False)) is not None:
+        return ToolOutput(result={"error": error}, citations=[])
+    return await search_applications(
         args, semantic=area.semantic, datahub=area.datahub, citation_id=citation_id
     )
 
@@ -676,14 +1005,31 @@ def _describe(args: _Args, semantic: SemanticLayer) -> str:
         E.g. "Brent applications validated in 2024 (valid_date) with council
         decision Refused, excluding decisions recorded but not yet issued".
     """
-    field = _default_filter(semantic, "year").date_field[
-        DATE_BASIS_KEY[args.date_basis]
-    ]
-    text = f"{args.local_authority} applications {args.date_basis} in {args.year} ({field})"
+    text = f"{args.local_authority}"
+    if args.application_type is not None:
+        text += f" {args.application_type}"
+    text += " applications"
+    if args.pending:
+        text += " still awaiting a decision"
+    if args.year is not None:
+        field = _default_filter(semantic, "year").date_field[
+            DATE_BASIS_KEY[args.date_basis]
+        ]
+        when = (
+            f"{date(args.year, args.month, 1):%B} {args.year}"
+            if args.month
+            else args.year
+        )
+        verb = args.date_basis.replace("_", " ")
+        text += f" {verb} in {when} ({field})"
     if args.decision is not None:
         text += f" with council decision {args.decision}"
         if "decision_not_issued" in _default_filter(semantic, "decided").exclude_flags:
             text += ", excluding decisions recorded but not yet issued"
+    if args.appeal_decision is not None:
+        text += f" with appeal decision {args.appeal_decision}"
+    if args.pending and _default_filter(semantic, "pending").exclude_flags:
+        text += ", excluding records whose pending status is out of date"
     return text
 
 
@@ -695,16 +1041,18 @@ def _notes(args: _Args, semantic: SemanticLayer) -> list[str]:
         semantic: The borough's semantic layer.
 
     Returns:
-        The ``year`` default-filter rule, and with a decision the live rule on
-        published values; each on one line, as written in ``live_api.yaml``.
+        The ``year`` default-filter rule (with a year); with a decision or pending,
+        the live rule on published values; with pending, the borough's live rule on
+        out-of-date pending records. Each on one line, as written in
+        ``live_api.yaml``.
     """
-    notes = [_default_filter(semantic, "year").rule]
-    if args.decision is not None:
-        notes += [
-            rule.rule
-            for rule in semantic.live.live_rules
-            if rule.id == "counts_use_published_values"
-        ]
+    notes = [_default_filter(semantic, "year").rule] if args.year is not None else []
+    wanted = set()
+    if args.decision is not None or args.pending:
+        wanted.add("counts_use_published_values")
+    if args.pending:
+        wanted |= {"pending_may_be_stale", "status_stale_today"}
+    notes += [rule.rule for rule in semantic.live.live_rules if rule.id in wanted]
     return [" ".join(note.split()) for note in notes if note]
 
 
@@ -777,6 +1125,32 @@ def _flag_condition(flag: str, semantic: SemanticLayer) -> dict[str, Any]:
         NotImplementedError: For a flag no tool handles yet.
     """
     rule = next(r for r in semantic.cleaning_rules["derived"] if r["id"] == flag)
+    if flag == "status_stale":
+        # Measured from today, as status_stale_today in live_api.yaml says.
+        cutoff = date.today() - timedelta(days=rule["stale_after_days"])
+        return {
+            "bool": {
+                "should": [
+                    {"terms": {"id": rule.get("ids", [])}},
+                    {
+                        "bool": {
+                            "filter": [
+                                _any_of("status", rule["when_status"]),
+                                {
+                                    "range": {
+                                        "decision_target_date": {
+                                            "lt": f"{cutoff:%d/%m/%Y}"
+                                        }
+                                    }
+                                },
+                            ],
+                            "must_not": [{"exists": {"field": "decision_date"}}],
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
+            }
+        }
     if flag == "decision_not_issued":
         return {
             "bool": {
